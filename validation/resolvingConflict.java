@@ -2,14 +2,27 @@ import java.io.*;
 import java.util.*;
 import java.nio.file.Paths;
 
+
+/*
+ * ASSUMPTIONS:
+ * dataFile:
+ *  - one object is voted by more than one source
+ *  - each object has at least two different votes
+ *  - exactly one of all the votes is true, rest are false
+ *  
+ * truthFile:
+ *  - true values are known for a sample of the dataFile
+ *  - file might not have objects in the same order as in the dataFile
+ */
+
+
 public class resolvingConflict {
 	public List<List<String>> dataTuples;
 	public List<List<String>> truthTuples;
 	public int numObjects;
 	public int numSources;
-	public List<List<String>> objectValues;
+	public List<List<String>> objectValues; // List of (List of different values for each object)
 	public int[] numberSourceVoted; // array containing the number of objects a source voted for
-	public int totalEntries = 0;  // total number of entries in the matrix
 	
 	public resolvingConflict(String dataFile, String truthFile) throws IOException {
 		this.dataTuples   = getTuplesFromFile (dataFile);
@@ -35,7 +48,6 @@ public class resolvingConflict {
 	            for (int i = 0; i < attributes.length; i++) {
 	            	if (!attributes[i].equals("")) {
 	            		singleTuple.add(attributes[i]);
-	            		this.totalEntries++;
 	            	}
 	            	else 
 	            		singleTuple.add(null);
@@ -116,7 +128,7 @@ public class resolvingConflict {
 	}
 	
 	/*
-	 * function to sort an array
+	 * function to sort an array in decreasing order
 	 * returns locations of sorted items in actual array
 	 * e.g. [4, 5, 3, 6] returns [3, 1, 0, 2]
 	 */
@@ -149,6 +161,13 @@ public class resolvingConflict {
 	/* 
 	 * function to compute effectiveness assuming groundTruth is known for the complete database
 	 * computing distance from truth 
+	 * distanceFromTruth d = average over all objects (1 - probability of true value)
+	 * *myAngle: d* for one object = sum over all distances from absolute probability distribution
+	 * *i.e., if truth = {1, 0, 0} and p = {0.7, 0.2, 0.1}
+	 * d* = |1 - 0.7| + |0 - 0.2| + |0 - 0.1| = 0.6, while
+	 * d =  |1 - 0.7| = 0.3  
+	 * conceptually, d* covers the entire distance but mathematically, while comparing two objects,
+	 * d and d* differ only by a factor of 2.
 	 */
 	public double computeDistanceFromTruth(accuPR t) {
 		double distance = 0;
@@ -173,30 +192,18 @@ public class resolvingConflict {
 	
 	/*
 	 * function to compute overall database uncertainty 
+	 * computed as Shannon entropy, U_d = sum over all objects {E}
+	 * where E = sum over all values {-p log(p)}
 	 */
 	public double computeDatabaseUncertainty(double[][] probabilityValues) {
-		double dbUncertainty = 0; //dbUncentrainty = Shannon entropy
+		double dbUncertainty = 0; 
 		for (int i = 0; i < probabilityValues.length; i++) {
 			for (int j = 0; j < probabilityValues[i].length; j++) {
 				if (probabilityValues[i][j] > 0)
-					dbUncertainty += - probabilityValues[i][j] * Math.log(probabilityValues[i][j]);
+					dbUncertainty += -1 * probabilityValues[i][j] * Math.log(probabilityValues[i][j]);
 			}
 		}
 		return dbUncertainty;
-	}
-	
-	/*
-	 * function to compute centralities of all objects
-	 */
-	public double[] computeCentralities(List<Integer> tuplesNotValidated) { // for each source count #objects it voted for
-		double[] allObjectCentralities = new double[tuplesNotValidated.size()];
-		for (int i = 0; i < tuplesNotValidated.size(); i++) {
-			List<String> objectTupleList = this.dataTuples.get(tuplesNotValidated.get(i));
-			for (int j = 0; j < objectTupleList.size(); j++) 
-				if (this.dataTuples.get(tuplesNotValidated.get(i)).get(j) != null) // source voted
-					allObjectCentralities[i] += this.numberSourceVoted[j];
-		}
-		return allObjectCentralities;
 	}
 	
 	/*
@@ -208,32 +215,7 @@ public class resolvingConflict {
 				this.numberSourceVoted[i]--;
 		}
 	}
-	
-	/*
-	 * function to compute entropies of all objects
-	 */
-	public double[] computeEntropies() {
-		double fraction = 0;
-		double countNotNull = 0;
-		List<String> currentValues = new ArrayList<String>();
-		double[] allObjectEntropies = new double[this.numObjects];
 		
-		for (int i = 0; i < this.numObjects; i++) {
-			List<String> objectTupleList = this.dataTuples.get(i);
-			countNotNull = objectTupleList.size() - Collections.frequency(objectTupleList, null);
-			
-			currentValues = this.objectValues.get(i);
-			
-			if (currentValues.size() > 1) {
-				for (int j = 0; j < currentValues.size(); j++) {
-					fraction = (double) Collections.frequency(objectTupleList, currentValues.get(j)) / countNotNull;
-					allObjectEntropies[i]  += -1 * fraction * Math.log(fraction);
-				}
-			}
-		}
-		return allObjectEntropies;
-	}
-	
 	/*
 	 * function to select object that results in maximum database utility gain (using ground truth)
 	 * MUG: Maximum Utility Gain
@@ -361,20 +343,17 @@ public class resolvingConflict {
 	 */
 	public double[] computeForRandomSelection(accuPR basePredictor, int numberOfRuns) {
 		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
+		List<List<String>> indices = new ArrayList<List<String>> (); // list of <index, true value>
 		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
 		int count = 0;
 		Random random = new Random(System.currentTimeMillis());
 		accuPR tempPredictor;
 	    
-//		for (int i = 0; i < this.numObjects; i++)
-//			tuplesNotValidated.add(i);
-		
 		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
 		
 		for (int i = 0; i < this.truthTuples.size(); i++) {
 			if (this.truthTuples.get(i).size() > 1)
-				tuplesNotValidated.add(i);
+				tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		}
 		
 		for (int i = 0; i < numberOfRuns; i++) {
@@ -400,8 +379,11 @@ public class resolvingConflict {
 				countValidatedIterator++;
 			}
 					
-			for (int j = 0; j < this.numObjects; j++)
-				tuplesNotValidated.add(j);
+			// again add all objects to unvalidated list for next run
+			for (int j = 0; j < this.truthTuples.size(); j++) {
+				if (this.truthTuples.get(j).size() > 1)
+					tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(j).get(0)));
+			}
 		}
 				
 		for (int i = 1; i < distancesComputed.length; i++)
@@ -415,74 +397,59 @@ public class resolvingConflict {
 	 * aka MajorityVotingOrdering, or MVO
 	 */
 	public double[] computeForMVO(accuPR basePredictor) {
-		double[] allObjectEntropies = computeEntropies();
-		int[] entropyRanks = sortAndRank(allObjectEntropies);
-		int index = 0;
+		double fraction = 0;
+		double countNotNull = 0;
+		int currentObject;
+		double[] objectEntropies = new double[this.truthTuples.size()];
+		List<String> currentValues = new ArrayList<String>();
+		
+		// get entropies of objects in the truthfile
+		for (int i = 0; i < this.truthTuples.size(); i++) {
+			currentObject = Integer.parseInt(this.truthTuples.get(i).get(0));
+			List<String> objectTupleList = this.dataTuples.get(currentObject);
+			countNotNull = objectTupleList.size() - Collections.frequency(objectTupleList, null);
+			
+			currentValues = this.objectValues.get(currentObject);
+			
+			if (currentValues.size() > 1) {
+				for (int j = 0; j < currentValues.size(); j++) {
+					fraction = (double) Collections.frequency(objectTupleList, currentValues.get(j)) / countNotNull;
+					objectEntropies[i]  += -1 * fraction * Math.log(fraction);
+				}
+			}
+		}
+		
+		// sort objects in decreasing order of their entropies
+		int[] entropyRanks = sortAndRank(objectEntropies);
+		
+		// start validating objects
 		accuPR tempPredictor;
 		
 		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
 		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
 		int count = 0;
 		
 		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
 		
-		/*
-		 * this part for complete dataset truth
-		 */
-		for (int i = 0; i < this.numObjects; i++)
-			tuplesNotValidated.add(i);
+		for (int i = 0; i < this.truthTuples.size(); i++)
+			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
-		/*
-		 * START: this part for partial dataset truth
-		 */
-		
-//		double fraction = 0;
-//		double countNotNull = 0;
-//		List<String> currentValues = new ArrayList<String>();
-//		double[] entropies = new double[this.truthTuples.size()];
-//		
-//		for (int i = 0; i < entropies.length; i++) {
-//			List<String> objectTupleList = this.dataTuples.get(Integer.parseInt(this.truthTuples.get(i).get(0)));
-//			countNotNull = objectTupleList.size() - Collections.frequency(objectTupleList, null);
-//			
-//			currentValues = this.objectValues.get(Integer.parseInt(this.truthTuples.get(i).get(0)));
-//			
-//			if (currentValues.size() > 1) {
-//				for (int j = 0; j < currentValues.size(); j++) {
-//					fraction = (double) Collections.frequency(objectTupleList, currentValues.get(j)) / countNotNull;
-//					allObjectEntropies[i]  += -1 * fraction * Math.log(fraction);
-//				}
-//			}
-//		}
-//		
-//		entropyRanks = sortAndRank(entropies);
-//		
-//		for (int i = 0; i < this.truthTuples.size(); i++)
-//			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
-//		
-//		List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
-		/*
-		 * END: this part for partial dataset truth
-		 */
-		
+		List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
 		int countValidated = 0;
-		int countValidatedIterator = 13;
+		int countValidatedIterator = 0;
 		while (!tuplesNotValidated.isEmpty()) {
 			while (indices.size() < Math.pow(2, countValidatedIterator) && 
 					!tuplesNotValidated.isEmpty()) {
 				outerloop:
 				for (int i = countValidated; i < entropyRanks.length; i++) {
 					if (tuplesNotValidated.contains(entropyRanks[i])) {
-						index = tuplesNotValidated.indexOf(entropyRanks[i]);
+						indices.add(this.truthTuples.get(truthIndices.indexOf(entropyRanks[i])));
+						tuplesNotValidated.remove(tuplesNotValidated.indexOf(entropyRanks[i]));
+						countValidated++;
 						break outerloop;
 					}
 				}
-				indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
-//			indices.add(this.truthTuples.get(truthIndices.indexOf(tuplesNotValidated.get(index))));
-			
-				tuplesNotValidated.remove(index);
-				countValidated++;				
 			}
 			
 			tempPredictor = new accuPR(this.dataTuples, indices); 
@@ -494,225 +461,32 @@ public class resolvingConflict {
 		}
 		return distancesComputed;
 	}
-	
-	/*
-	 * function to compute validation with selecting object based on their centralities
-	 * or, number of objects voted by sources voting for an object
-	 * aka, CentralityOrdering
-	 */
-	public double[] computeForCO(accuPR basePredictor) {
-		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
-		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
-		int count = 0;
-		accuPR tempPredictor;
 		
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
-		
-		for (int i = 0; i < this.numObjects; i++)
-			tuplesNotValidated.add(i);
-		
-		
-		int countValidated = 0;
-		int countValidatedIterator = 0;
-		while (!tuplesNotValidated.isEmpty()) {
-			
-			int addObject;
-			
-			while (indices.size() < Math.pow(2, countValidatedIterator) 
-					&& !tuplesNotValidated.isEmpty()) {
-				double[] allObjectCentralities = computeCentralities(tuplesNotValidated);
-				
-				int[] centralityRanks = sortAndRank(allObjectCentralities);
-				
-				addObject = tuplesNotValidated.get(centralityRanks[0]);
-				indices.add(this.truthTuples.get(addObject));
-				decrementSourceCount(addObject);
-				tuplesNotValidated.remove(centralityRanks[0]);
-				countValidated++;
-			}
-			
-			tempPredictor = new accuPR(this.dataTuples, indices); 
-			distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
-			
-			if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
-				System.out.println(indices.size() + " : " + countValidated);
-			countValidatedIterator++;
-		}
-		return distancesComputed;
-	}
-	
-	/*
-	 * function to get HL_LH distribution from probability values and accuracies after basic EM
-	 * without any validation
-	 */
-	public void get_HL_LH_distribution(accuPR basePredictor, resolvingConflict r) {
-		int HL_indicator = 1; // HL -> High accuracy, low probability
-		int LH_indicator = -1; // Low accuracy, high probability
-		
-		double goodSourceAccuracy_threshold = 0.9;
-		double badSourceAccuracy_threshold = 0.7;
-		int[][] HL_LH_matrix = new int[this.numObjects][this.numSources];
-				
-		for (int i = 0; i < this.numObjects; i++) {
-			List<String> currentObjectValues = this.objectValues.get(i);
-			String value = null;
-			if (currentObjectValues.size() != 0) {
-				if (basePredictor.getValueProbability()[i][0] > basePredictor.getValueProbability()[i][1])
-					value = currentObjectValues.get(0);
-				else
-					value = currentObjectValues.get(1);
-				
-				for (int j = 0; j < this.dataTuples.get(i).size(); j++) {
-					if (this.dataTuples.get(i).get(j) != null) {
-						if (!this.dataTuples.get(i).get(j).equals(value) &&
-								basePredictor.getSourceAccuracy()[j] >= goodSourceAccuracy_threshold)
-							HL_LH_matrix[i][j] = Integer.valueOf(HL_indicator);
-						else if (this.dataTuples.get(i).get(j).equals(value) && 
-								basePredictor.getSourceAccuracy()[j] < badSourceAccuracy_threshold)
-							HL_LH_matrix[i][j] = Integer.valueOf(LH_indicator);		
-					}
-				}
-			}
-		}
-		
-		// get a sense of interesting votes, i.e. high accuracy source voting for low probability value
-		// and low accuracy source voting for high probability value
-
-		int countHL = 0;
-		int countLH = 0;
-		List<Integer> interestingObjects = new ArrayList<Integer>();
-		
-		boolean interesting = false;
-		for (int i = 0; i < r.numObjects; i++) {
-			interesting = false;
-			for (int j = 0; j < r.numSources; j++) {
-				if (HL_LH_matrix[i][j] == 1) {
-					countHL++;
-					interesting = true;
-				}
-				else if (HL_LH_matrix[i][j] == -1) {
-					countLH++;
-					interesting = true;
-				}
-			}
-			if (interesting)
-				interestingObjects.add(i);
-		}
-		
-		System.out.println("% countHL: " + (double)countHL/r.totalEntries);
-		System.out.println("% countLH: " + (double)countLH/r.totalEntries);
-		System.out.println("#interestingObjects: " + interestingObjects.size());
-	}
-	
-	/*
-	 * function to get statistics regarding shortest path distances in object-object network
-	 */
-	public void get_all_pairs_shortest_distance(resolvingConflict r) {
-		int[][] objectsGraph = new int[r.numObjects][r.numObjects];
-		for (int i = 0; i < r.numObjects; i++) {
-			for (int j = 0; j < r.numObjects; j++) {
-				sourceLoop:
-				for (int k = 0; k < r.numSources; k++) {
-					if (r.dataTuples.get(i).size() > k && r.dataTuples.get(j).size() > k) {
-						if (r.dataTuples.get(i).get(k) != null && r.dataTuples.get(j).get(k) != null) {
-							objectsGraph[i][j] = 1;
-							objectsGraph[j][i] = 1;
-							break sourceLoop;
-						}
-					}
-				}
-			}
-		}
-		
-		// write to .gml file
-		try{
-			BufferedWriter writer = new BufferedWriter(new FileWriter("/Users/rpradhan/Desktop/graph.txt"));
-//			writer.write("graph [\n");
-//			for (int i = 0; i < objectsGraph.length; i++) 
-//		    	writer.write("\tnode [\n\t\tid " + i + "\n\t\tlabel \"\"" + i + "\"\"\n\t]\n");
-
-			for (int i = 0; i < objectsGraph.length; i++) {
-				for (int j = 0; j < i; j++) {
-					if (objectsGraph[i][j] == 1) {
-						writer.write(i + "\t" + j + "\t" + 1 + "\n");
-					}
-				}
-			}
-//			writer.write("]");
-			writer.close();
-		}
-		catch (Exception e) {
-			e.printStackTrace();
-		}
-	
-		int[][] allPairsDistance = new int[r.numObjects][r.numObjects];
-		for (int i = 0; i < objectsGraph.length; i++) {
-			for (int j = 0; j < objectsGraph.length; j++) {
-				if (objectsGraph[i][j] == 1) 
-					allPairsDistance[i][j] = 1;
-				else
-					allPairsDistance[i][j] = Integer.MAX_VALUE - 10;
-			}
-			allPairsDistance[i][i] = 0;
-		}
-		
-		int[] distanceDistribution = new int[3];
-		for (int i = 0; i < objectsGraph.length; i++) {
-			for (int j = 0; j < objectsGraph.length; j++) {
-				if (i != j && allPairsDistance[i][j] > 1) {
-					for (int k = 0; k < objectsGraph.length; k++) {
-						if (allPairsDistance[i][j] > allPairsDistance[i][k] + allPairsDistance[k][j]) 
-							allPairsDistance[i][j] = allPairsDistance[i][k] + allPairsDistance[k][j];
-					}
-				}
-				System.out.println(allPairsDistance[i][j]);
-				if (i < j)
-					distanceDistribution[allPairsDistance[i][j]]++;
-			}
-		}
-		
-		int max = 0;
-		for (int i = 0; i < objectsGraph.length; i++) {
-			for (int j = 0; j < objectsGraph.length; j++) {
-				if (allPairsDistance[i][j] > max)
-					max = allPairsDistance[i][j];
-			}
-		}
-	}
-	
 	/*
 	 * args[0] : dataFile, args[1] : truthFile
 	 */
 	public static void main (String[] args) throws IOException {
 		resolvingConflict r = new resolvingConflict(args[0], args[1]);
 
-		long startTime = System.nanoTime();     // 10^(-9) seconds
+		long startTime = System.nanoTime();
 		
 		// basic EM, no validation
 		accuPR	basePredictor = new accuPR (r.dataTuples, null);
-
-		// high accuracy sources voting for low probability values, vice versa
-//		r.get_HL_LH_distribution(basePredictor, r);
 		
-		// all-pairs shortest paths for all objects
-//		r.get_all_pairs_shortest_distance(r);
-		
-		// for small scale experiments
+		// small scale experiments
 		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
-//		double[] distancesComputed = r.computeForRandomSelection(basePredictor, numberOfRuns_s);
-//		double[] distancesComputed = r.computeForMU(basePredictor);
-//		double[] distancesComputed = r.computeForMEU(basePredictor);
-
-		// for large scale experiments
-		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
-//		double[] distancesComputed = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
-		double[] distancesComputed = r.computeForMVO(basePredictor); // changed MVO to validate objects exponentially
-//		double[] distancesComputed = r.computeForCO(basePredictor);
-
-		System.out.println("estimatedTime: " + (System.nanoTime() - startTime)*(Math.pow(10, -9)));
+		double[] distancesComputed_s_r = r.computeForRandomSelection(basePredictor, numberOfRuns_s);
+		double[] distancesComputed_s_u = r.computeForMU(basePredictor);
+		double[] distancesComputed_s_e = r.computeForMEU(basePredictor);
 		
-		String folderName = (Paths.get(args[0])).getParent().toString();
-		r.write_1D_ToFile(distancesComputed, folderName + "/results.txt");
+		// large scale experiments
+		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
+		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
+		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
+		
+		System.out.println("estimatedTime: " + (System.nanoTime() - startTime) * (Math.pow(10, -9)));
+		
+//		String folderName = (Paths.get(args[0])).getParent().toString();
+//		r.write_1D_ToFile(distancesComputed, folderName + "/results.txt");
 	}
 }
