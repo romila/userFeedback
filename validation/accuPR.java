@@ -155,17 +155,17 @@ public class accuPR {
 						this.valueProbability[currentObj][locationOfTrueValue] = 1;
 				}
 			
-				for (int j = 0; j < numSources; j++) {
-					if (dataTuples.get(currentObj).size() > j &&
-							dataTuples.get(currentObj).get(j) != null) {
-						if (indices.get(i).size() > 1) {
-							if (dataTuples.get(currentObj).get(j).equals(indices.get(i).get(1)))
-								this.sourceAccuracy[j] += (double)1/numberOfObjectsVoted[j];
-							else
-								this.sourceAccuracy[j] -= (double)1/numberOfObjectsVoted[j];
-						}
-					}
-				}
+//				for (int j = 0; j < numSources; j++) {
+//					if (dataTuples.get(currentObj).size() > j &&
+//							dataTuples.get(currentObj).get(j) != null) {
+//						if (indices.get(i).size() > 1) {
+//							if (dataTuples.get(currentObj).get(j).equals(indices.get(i).get(1)))
+//								this.sourceAccuracy[j] += (double)1/numberOfObjectsVoted[j];
+//							else
+//								this.sourceAccuracy[j] -= (double)1/numberOfObjectsVoted[j];
+//						}
+//					}
+//				}
 			}
 		}
 		

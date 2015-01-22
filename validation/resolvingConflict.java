@@ -339,6 +339,55 @@ public class resolvingConflict {
 	}
 	
 	/*
+	 * function to compute validation with selecting objects randomly (small scale)
+	 */
+	public double[] computeForRandomSelection_smallScale(accuPR basePredictor, int numberOfRuns) {
+		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
+		List<List<String>> indices = new ArrayList<List<String>> (); // list of <index, true value>
+		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
+		int count = 0;
+		Random random = new Random(System.currentTimeMillis());
+		accuPR tempPredictor;
+	    
+		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
+		
+		for (int i = 0; i < this.truthTuples.size(); i++) {
+			if (this.truthTuples.get(i).size() > 1)
+				tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
+		}
+		
+		for (int i = 0; i < numberOfRuns; i++) {
+			count = 1;
+			indices.clear();
+			
+			int countValidated = 0;
+			while (!tuplesNotValidated.isEmpty()) {
+					int index = random.nextInt(tuplesNotValidated.size());
+				    indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
+					tuplesNotValidated.remove(index);
+					countValidated++;				
+				
+				tempPredictor = new accuPR(this.dataTuples, indices); 
+				distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
+				
+				if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
+					System.out.println(indices.size() + " : " + countValidated);
+			}
+					
+			// again add all objects to unvalidated list for next run
+			for (int j = 0; j < this.truthTuples.size(); j++) {
+				if (this.truthTuples.get(j).size() > 1)
+					tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(j).get(0)));
+			}
+		}
+				
+		for (int i = 1; i < distancesComputed.length; i++)
+			distancesComputed[i] /= numberOfRuns;
+		
+		return distancesComputed;
+	}
+	
+	/*
 	 * function to compute validation with selecting objects randomly
 	 */
 	public double[] computeForRandomSelection(accuPR basePredictor, int numberOfRuns) {
@@ -475,18 +524,20 @@ public class resolvingConflict {
 		
 		// small scale experiments
 		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
-		double[] distancesComputed_s_r = r.computeForRandomSelection(basePredictor, numberOfRuns_s);
+		double[] distancesComputed_s_r = r.computeForRandomSelection_smallScale(basePredictor, numberOfRuns_s);
 		double[] distancesComputed_s_u = r.computeForMU(basePredictor);
 		double[] distancesComputed_s_e = r.computeForMEU(basePredictor);
 		
 		// large scale experiments
-		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
-		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
-		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
+//		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
+//		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
+//		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
 		
 		System.out.println("estimatedTime: " + (System.nanoTime() - startTime) * (Math.pow(10, -9)));
 		
-//		String folderName = (Paths.get(args[0])).getParent().toString();
-//		r.write_1D_ToFile(distancesComputed, folderName + "/results.txt");
+		String folderName = (Paths.get(args[0])).getParent().toString();
+		r.write_1D_ToFile(distancesComputed_s_r, folderName + "/random.txt");
+		r.write_1D_ToFile(distancesComputed_s_u, folderName + "/mu.txt");
+		r.write_1D_ToFile(distancesComputed_s_e, folderName + "/meu.txt");
 	}
 }
