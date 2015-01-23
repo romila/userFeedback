@@ -512,32 +512,61 @@ public class resolvingConflict {
 	}
 		
 	/*
+	 * function to build the object-object network 
+	 */
+	public void buildObjectNetwork() throws IOException {
+		BufferedWriter writer = new BufferedWriter(new FileWriter("object_network.txt"));
+		int count = 0;
+		for (int i = 0; i < this.numObjects; i++) {
+			for (int j = 0; j < i; j++) {
+				count = 0;		
+				for (int k = 0; k < this.numSources; k++) {
+					if (this.dataTuples.get(i).size() > k && this.dataTuples.get(j).size() > k) {
+						if (this.dataTuples.get(i).get(k) != null && 
+							this.dataTuples.get(j).get(k) != null) 
+								count++;
+					}
+				}
+			
+				if (count > 2 * this.numSources / 3) 
+					writer.write(String.valueOf(i) + "\t" + String.valueOf(j) + "\t" + String.valueOf(count) + "\n");
+			}
+		}
+		
+		writer.close();
+		System.out.println("Pause");
+	}
+	
+	/*
 	 * args[0] : dataFile, args[1] : truthFile
 	 */
 	public static void main (String[] args) throws IOException {
 		resolvingConflict r = new resolvingConflict(args[0], args[1]);
 
-		long startTime = System.nanoTime();
+		// get object-object network
+		r.buildObjectNetwork();
 		
-		// basic EM, no validation
-		accuPR	basePredictor = new accuPR (r.dataTuples, null);
-		
-		// small scale experiments
-		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
-		double[] distancesComputed_s_r = r.computeForRandomSelection_smallScale(basePredictor, numberOfRuns_s);
-		double[] distancesComputed_s_u = r.computeForMU(basePredictor);
-		double[] distancesComputed_s_e = r.computeForMEU(basePredictor);
-		
-		// large scale experiments
-//		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
-//		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
-//		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
-		
-		System.out.println("estimatedTime: " + (System.nanoTime() - startTime) * (Math.pow(10, -9)));
-		
-		String folderName = (Paths.get(args[0])).getParent().toString();
-		r.write_1D_ToFile(distancesComputed_s_r, folderName + "/random.txt");
-		r.write_1D_ToFile(distancesComputed_s_u, folderName + "/mu.txt");
-		r.write_1D_ToFile(distancesComputed_s_e, folderName + "/meu.txt");
+//		long startTime = System.nanoTime();
+//		
+//		// basic EM, no validation
+//		accuPR	basePredictor = new accuPR (r.dataTuples, null);
+//		
+//		// small scale experiments
+//		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
+//		double[] distancesComputed_s_r = r.computeForRandomSelection_smallScale(basePredictor, numberOfRuns_s);
+//		double[] distancesComputed_s_u = r.computeForMU(basePredictor);
+//		double[] distancesComputed_s_e = r.computeForMEU(basePredictor);
+//		
+//		// large scale experiments
+////		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
+////		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
+////		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
+//		
+//		System.out.println("estimatedTime: " + (System.nanoTime() - startTime) * (Math.pow(10, -9)));
+//		
+//		String folderName = (Paths.get(args[0])).getParent().toString();
+//		r.write_1D_ToFile(distancesComputed_s_r, folderName + "/random.txt");
+//		r.write_1D_ToFile(distancesComputed_s_u, folderName + "/mu.txt");
+//		r.write_1D_ToFile(distancesComputed_s_e, folderName + "/meu.txt");
 	}
 }
