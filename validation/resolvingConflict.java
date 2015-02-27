@@ -2,7 +2,6 @@ import java.io.*;
 import java.util.*;
 import java.nio.file.Paths;
 
-
 /*
  * ASSUMPTIONS:
  * dataFile:
@@ -15,7 +14,6 @@ import java.nio.file.Paths;
  *  - file might not have objects in the same order as in the dataFile
  */
 
-
 public class resolvingConflict {
 	public List<List<String>> dataTuples;
 	public List<List<String>> truthTuples;
@@ -23,6 +21,7 @@ public class resolvingConflict {
 	public int numSources;
 	public List<List<String>> objectValues; // List of (List of different values for each object)
 	public int[] numberSourceVoted; // array containing the number of objects a source voted for
+	public accuPR basePredictor;
 	
 	public resolvingConflict(String dataFile, String truthFile) throws IOException {
 		this.dataTuples   = getTuplesFromFile (dataFile);
@@ -33,6 +32,7 @@ public class resolvingConflict {
 		
 		this.numberSourceVoted = new int[this.numSources];
 		getObjectUniqueValues();
+		this.basePredictor = new accuPR (this.dataTuples, null);
 	}
 	
 	/*
@@ -205,23 +205,12 @@ public class resolvingConflict {
 		}
 		return dbUncertainty;
 	}
-	
-	/*
-	 * function to remove an object from further consideration once it has been validated
-	 */
-	public void decrementSourceCount(int index) {
-		for (int i = 0; i < this.dataTuples.get(index).size(); i++) {
-			if (this.dataTuples.get(index).get(i) != null)
-				this.numberSourceVoted[i]--;
-		}
-	}
 		
 	/*
 	 * function to select object that results in maximum database utility gain (using ground truth)
 	 * MUG: Maximum Utility Gain
 	 */
-	public int selectObjectWithMUG(List<Integer> tuplesNotValidated, List<List<String>> indices,
-			accuPR	basePredictor) {
+	public int selectObjectWithMUG(List<Integer> tuplesNotValidated, List<List<String>> indices) {
 		
 		double[] listDistance 	 = new double[tuplesNotValidated.size()];
 		for (int i = 0; i < tuplesNotValidated.size(); i++) {
@@ -242,10 +231,9 @@ public class resolvingConflict {
 	 * function to select object that results in maximum expected database utility gain
 	 * MEUG: Maximum Expected Utility Gain
 	 */
-	public int selectObjectWithMEUG(List<Integer> tuplesNotValidated, List<List<String>> indices,
-			accuPR	basePredictor) {
+	public int selectObjectWithMEUG(List<Integer> tuplesNotValidated, List<List<String>> indices) {
 		
-		double baseDatabaseUncertainty 	= computeDatabaseUncertainty (basePredictor.getValueProbability());
+		double baseDatabaseUncertainty 	= computeDatabaseUncertainty (this.basePredictor.getValueProbability());
 		double[ ] expectedUtility 	 = new double[tuplesNotValidated.size()];
 		
 		List<String> indexTuple = new ArrayList<String>();
@@ -262,9 +250,9 @@ public class resolvingConflict {
 				tempIndices.add(indexTuple);
 				
 				accuPR	tempValidatedPredictor	= new accuPR(this.dataTuples, tempIndices);
-				tupleDBUncertainty += basePredictor.getValueProbability()[tuplesNotValidated.get(i)][j] * 
+				tupleDBUncertainty += this.basePredictor.getValueProbability()[tuplesNotValidated.get(i)][j] * 
 										computeDatabaseUncertainty(tempValidatedPredictor.getValueProbability());
-				denominator += basePredictor.getValueProbability()[tuplesNotValidated.get(i)][j];
+				denominator += this.basePredictor.getValueProbability()[tuplesNotValidated.get(i)][j];
 			}
 			tupleDBUncertainty /= denominator;
 			
@@ -278,70 +266,87 @@ public class resolvingConflict {
 	}
 	
 	/*
-	 * function to compute validation with selecting object that results in maximum database utility gain
+	 * function to compute validation by selecting object that results in maximum database utility gain
 	 * using ground truth
 	 */
-	public double[] computeForMU(accuPR	basePredictor) throws IOException {
-		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
-		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
-		int count = 0;
-		accuPR tempPredictor;
-		
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
-		
+	public double[] computeForMU() throws IOException {
+		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
 		for (int i = 0; i < this.numObjects; i++)
 			tuplesNotValidated.add(i);
 		
+		double[] distancesComputed = new double[this.numObjects + 1];
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
+		int count = 0;
+		
+		accuPR tempPredictor;
+		distancesComputed[count++] = computeDistanceFromTruth(this.basePredictor);
+		
+		int countValidated = 0;
+		int countValidatedIterator = 1;
+		
 		while (!tuplesNotValidated.isEmpty()) {
-			// TODO: might want to select with tempPredictor
-			int index = selectObjectWithMUG(tuplesNotValidated, indices, basePredictor);
-			indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
+			while (indices.size() < 50 * countValidatedIterator &&
+					!tuplesNotValidated.isEmpty()) {
+		
+				int index = selectObjectWithMUG(tuplesNotValidated, indices);
+				indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
+				tuplesNotValidated.remove(index);
+				countValidated++;	
+			}
+				
+			tempPredictor = new accuPR(this.dataTuples, indices); 
+			distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
+		
+			if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
+				System.out.println(indices.size() + " : " + countValidated);
+			countValidatedIterator++;
+			
+		}
+		return distancesComputed;
+	}
+	
+	/*
+	 * function to compute validation by selecting object that results in maximum expected database utility gain
+	 */
+	public double[]  computeForMEU() {
+		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		for (int i = 0; i < this.numObjects; i++)
+			tuplesNotValidated.add(i);
+		
+		double[] distancesComputed = new double[this.numObjects + 1];
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
+		int count = 0;
+		
+		distancesComputed[count++] = computeDistanceFromTruth(this.basePredictor);
+		accuPR tempPredictor;
+		
+		int countValidated = 0;
+		int countValidatedIterator = 1;
+		
+		while (!tuplesNotValidated.isEmpty()) {
+			while (indices.size() < 50 * countValidatedIterator &&
+					!tuplesNotValidated.isEmpty()) {
+				int index = selectObjectWithMEUG(tuplesNotValidated, indices);
+				indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
+				tuplesNotValidated.remove(index);
+				countValidated++;	
+			}
 			
 			tempPredictor = new accuPR(this.dataTuples, indices); 
 			distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
-			tuplesNotValidated.remove(index);
-			if (count%100 == 0)
-				System.out.println(count);
+			
+			if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
+				System.out.println(indices.size() + " : " + countValidated);
+			countValidatedIterator++;
 		}
+				
 		return distancesComputed;
 	}
 	
 	/*
-	 * function to compute validation with selecting object that results in maximum expected database utility gain
+	 * function to compute validation by selecting objects randomly
 	 */
-	public double[]  computeForMEU(accuPR	basePredictor) {
-		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>>(); // <index, value true>
-		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
-		int count = 0;
-		accuPR tempPredictor;
-		
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
-		
-		for (int i = 0; i < this.numObjects; i++)
-			tuplesNotValidated.add(i);
-		
-		while (!tuplesNotValidated.isEmpty()) {
-			int index = selectObjectWithMEUG(tuplesNotValidated, indices, basePredictor);
-			
-			indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
-			
-			tempPredictor = new accuPR(this.dataTuples, indices);
-//			System.out.println(index + ":" + tempPredictor.getIterations());
-			
-			distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
-			tuplesNotValidated.remove(index);
-			if (count%100 == 0)
-				System.out.println(count);
-		}
-		return distancesComputed;
-	}
-	
-	/*
-	 * function to compute validation with selecting objects randomly (small scale)
-	 */
-	public double[] computeForRandomSelection_smallScale(accuPR basePredictor, int numberOfRuns) {
+	public double[] computeForRandomSelection(int numberOfRuns) {
 		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
 		List<List<String>> indices = new ArrayList<List<String>> (); // list of <index, true value>
 		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
@@ -349,7 +354,7 @@ public class resolvingConflict {
 		Random random = new Random(System.currentTimeMillis());
 		accuPR tempPredictor;
 	    
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
+		distancesComputed[count++] = computeDistanceFromTruth(this.basePredictor);
 		
 		for (int i = 0; i < this.truthTuples.size(); i++) {
 			if (this.truthTuples.get(i).size() > 1)
@@ -361,58 +366,9 @@ public class resolvingConflict {
 			indices.clear();
 			
 			int countValidated = 0;
+			int countValidatedIterator = 1;
 			while (!tuplesNotValidated.isEmpty()) {
-					int index = random.nextInt(tuplesNotValidated.size());
-				    indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
-					tuplesNotValidated.remove(index);
-					countValidated++;				
-				
-				tempPredictor = new accuPR(this.dataTuples, indices); 
-				distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
-				
-				if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
-					System.out.println(indices.size() + " : " + countValidated);
-			}
-					
-			// again add all objects to unvalidated list for next run
-			for (int j = 0; j < this.truthTuples.size(); j++) {
-				if (this.truthTuples.get(j).size() > 1)
-					tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(j).get(0)));
-			}
-		}
-				
-		for (int i = 1; i < distancesComputed.length; i++)
-			distancesComputed[i] /= numberOfRuns;
-		
-		return distancesComputed;
-	}
-	
-	/*
-	 * function to compute validation with selecting objects randomly
-	 */
-	public double[] computeForRandomSelection(accuPR basePredictor, int numberOfRuns) {
-		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
-		List<List<String>> indices = new ArrayList<List<String>> (); // list of <index, true value>
-		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
-		int count = 0;
-		Random random = new Random(System.currentTimeMillis());
-		accuPR tempPredictor;
-	    
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
-		
-		for (int i = 0; i < this.truthTuples.size(); i++) {
-			if (this.truthTuples.get(i).size() > 1)
-				tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
-		}
-		
-		for (int i = 0; i < numberOfRuns; i++) {
-			count = 1;
-			indices.clear();
-			
-			int countValidated = 0;
-			int countValidatedIterator = 0;
-			while (!tuplesNotValidated.isEmpty()) {
-				while (indices.size() < Math.pow(2, countValidatedIterator) && 
+				while (indices.size() < 50 * countValidatedIterator  && 
 						!tuplesNotValidated.isEmpty()) {
 					int index = random.nextInt(tuplesNotValidated.size());
 				    indices.add(this.truthTuples.get(tuplesNotValidated.get(index)));
@@ -442,10 +398,10 @@ public class resolvingConflict {
 	}
 	
 	/*
-	 * function to compute validation with selecting object based on their entropies
+	 * function to compute validation by selecting object based on their entropies
 	 * aka MajorityVotingOrdering, or MVO
 	 */
-	public double[] computeForMVO(accuPR basePredictor) {
+	public double[] computeForMVO() {
 		double fraction = 0;
 		double countNotNull = 0;
 		int currentObject;
@@ -471,7 +427,6 @@ public class resolvingConflict {
 		// sort objects in decreasing order of their entropies
 		int[] entropyRanks = sortAndRank(objectEntropies);
 		
-		// start validating objects
 		accuPR tempPredictor;
 		
 		double[] distancesComputed = new double[this.numObjects + 1]; // store initial distance from truth at index 0
@@ -479,16 +434,16 @@ public class resolvingConflict {
 		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
 		int count = 0;
 		
-		distancesComputed[count++] = computeDistanceFromTruth(basePredictor);
+		distancesComputed[count++] = computeDistanceFromTruth(this.basePredictor);
 		
 		for (int i = 0; i < this.truthTuples.size(); i++)
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
 		List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
 		int countValidated = 0;
-		int countValidatedIterator = 0;
+		int countValidatedIterator = 1;
 		while (!tuplesNotValidated.isEmpty()) {
-			while (indices.size() < Math.pow(2, countValidatedIterator) && 
+			while (indices.size() < 50 * countValidatedIterator &&
 					!tuplesNotValidated.isEmpty()) {
 				outerloop:
 				for (int i = countValidated; i < entropyRanks.length; i++) {
@@ -510,34 +465,154 @@ public class resolvingConflict {
 		}
 		return distancesComputed;
 	}
+	
+	/*
+	 * for 2-valued case, returns the cardinality of set of sources that vote for
+	 * value i in A and j in B, {i,j}
+	 * {{dA,dB}, {dA,nB}, {nA,dB}, {nA,nB}}
+	 */
+	public int[] numSources_set(List<String> aValues, List<String> bValues,
+								String domA, String nonDomA,
+								String domB, String nonDomB) {
+		int[] num_set = new int[4]; 
 		
+		for (int i = 0; i < this.numSources; i++) {
+			if (aValues.size() > i && bValues.size() >i &&
+					aValues.get(i) != null && bValues.get(i) != null) {
+				if (aValues.get(i).equals(domA) && bValues.get(i).equals(domB))
+					num_set[0]++;
+				else if (aValues.get(i).equals(domA) && bValues.get(i).equals(nonDomB))
+					num_set[1]++;
+				else if (aValues.get(i).equals(nonDomA) && bValues.get(i).equals(domB))
+					num_set[2]++;
+				else if (aValues.get(i).equals(nonDomA) && bValues.get(i).equals(nonDomB))
+					num_set[3]++;
+			}
+		}
+		return num_set;
+	}
+	
+	/*
+	 * function to compute impact on b due to validation of a
+	 * 2 - value case
+	 */
+	public double getDelta_b_dueTo_a(int a, int b) {
+		List<String> aValues = this.dataTuples.get(a);
+		List<String> bValues = this.dataTuples.get(b);
+		List<String> a_uniqueValues = this.objectValues.get(a);
+		List<String> b_uniqueValues = this.objectValues.get(b);
+		
+		if (aValues.size() == 0 || bValues.size() == 0)
+			return 0;
+		
+		int indexOf_domA = getIndexOfMaximumValue(this.basePredictor.getValueProbability()[a]);
+		int indexOf_domB = getIndexOfMaximumValue(this.basePredictor.getValueProbability()[b]);
+		String domA = a_uniqueValues.get(indexOf_domA);
+		String domB = b_uniqueValues.get(indexOf_domB);
+		
+		String nonDomA;
+		if (a_uniqueValues.size() == 1)
+			nonDomA = null;
+		else
+			nonDomA = a_uniqueValues.get(indexOf_domA == 0 ? 1:0);
+		
+		String nonDomB;
+		if (b_uniqueValues.size() == 1)
+			nonDomB = null;
+		else
+			nonDomB = b_uniqueValues.get(indexOf_domB == 0 ? 1:0);
+		
+		double p_domA = this.basePredictor.getValueProbability()[a][indexOf_domA];
+		double p_domB = this.basePredictor.getValueProbability()[b][indexOf_domB];
+		
+		double acc_EM = 0.8;
+		
+		int[] cardinality = numSources_set(aValues, bValues, domA, nonDomA, domB, nonDomB);
+		
+		double dp_dB_dA = (1 - p_domA) * p_domB * (1 - p_domB) * 
+			(-cardinality[1] + cardinality[3] + cardinality[0] - cardinality[2]);
+		double dp_dB_nA = (1 - p_domA) * p_domB * (1 - p_domB) * 
+				(cardinality[1] - cardinality[3] - cardinality[0] + cardinality[2]);
+		
+		double dp_dB = p_domA * dp_dB_dA + (1 - p_domA) * dp_dB_nA;
+		
+		double dp_nB_dA = (1 - p_domA) * (1 - p_domB) * p_domB * 
+				(-cardinality[0] + cardinality[2] + cardinality[1] - cardinality[3]);
+		double dp_nB_nA = (1 - p_domA) * p_domB * (1 - p_domB) * 
+				(cardinality[0] - cardinality[2] - cardinality[1] + cardinality[3]);
+			
+		double dp_nB = p_domA * dp_nB_dA + (1 - p_domA) * dp_nB_nA;
+		
+		double dp_B = acc_EM * dp_dB + (1-acc_EM) * dp_nB;
+		return dp_B;
+	}
+	
+	/*
+	 * function to compute validation by selecting object based on their deltas
+	 */
+	public double[] computeForDeltas() {
+		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		for (int i = 0; i < this.numObjects; i++)
+			tuplesNotValidated.add(i);
+		
+		double[] distancesComputed = new double[this.numObjects + 1];
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
+		int count = 0;
+		List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
+		
+		distancesComputed[count++] = computeDistanceFromTruth(this.basePredictor);
+		accuPR tempPredictor;
+		
+		int countValidated = 0;
+		int countValidatedIterator = 1;
+		
+		while (!tuplesNotValidated.isEmpty()) {
+			while (indices.size() < 50 * countValidatedIterator &&
+					!tuplesNotValidated.isEmpty()) {
+				double[] delta_p = new double[tuplesNotValidated.size()];
+				for (int i = 0; i < tuplesNotValidated.size(); i++) {
+					// say object at i has been validated
+					int iobj = tuplesNotValidated.get(i);
+					for (int j = 0; j < tuplesNotValidated.size(); j++) {
+						int jobj = tuplesNotValidated.get(j);
+						delta_p[i] += getDelta_b_dueTo_a(iobj, jobj);
+					}
+				}
+				
+				int index = getIndexOfMaximumValue(delta_p);
+				indices.add(this.truthTuples.get(truthIndices.indexOf(tuplesNotValidated.get(index))));
+				tuplesNotValidated.remove(index);
+				countValidated++;	
+			}
+			
+			tempPredictor = new accuPR(this.dataTuples, indices); 
+			distancesComputed[count++] += computeDistanceFromTruth(tempPredictor);
+			
+			if (indices.size() > 100 && indices.size() % ((indices.size()/100) * 100) >= 0)
+				System.out.println(indices.size() + " : " + countValidated);
+			countValidatedIterator++;
+		}
+				
+		return distancesComputed;
+	}
+	
 	/*
 	 * args[0] : dataFile, args[1] : truthFile
 	 */
 	public static void main (String[] args) throws IOException {
 		resolvingConflict r = new resolvingConflict(args[0], args[1]);
 
-		long startTime = System.nanoTime();
-		
-		// basic EM, no validation
-		accuPR	basePredictor = new accuPR (r.dataTuples, null);
-		
-		// small scale experiments
 		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
-		double[] distancesComputed_s_r = r.computeForRandomSelection_smallScale(basePredictor, numberOfRuns_s);
-		double[] distancesComputed_s_u = r.computeForMU(basePredictor);
-		double[] distancesComputed_s_e = r.computeForMEU(basePredictor);
+		double[] distancesComputed_r = r.computeForRandomSelection(numberOfRuns_s);
+		double[] distancesComputed_u = r.computeForMU();
+		double[] distancesComputed_e = r.computeForMEU();
+		double[] distancesComputed_v = r.computeForMVO();
+		double[] distancesComputed_d = r.computeForDeltas();
 		
-		// large scale experiments
-//		int numberOfRuns_l = 1; // for random experiment, how many times to simulate
-//		double[] distancesComputed_l_r = r.computeForRandomSelection(basePredictor, numberOfRuns_l);
-//		double[] distancesComputed_l_v = r.computeForMVO(basePredictor); 
-		
-		System.out.println("estimatedTime: " + (System.nanoTime() - startTime) * (Math.pow(10, -9)));
-		
-		String folderName = (Paths.get(args[0])).getParent().toString();
-		r.write_1D_ToFile(distancesComputed_s_r, folderName + "/random.txt");
-		r.write_1D_ToFile(distancesComputed_s_u, folderName + "/mu.txt");
-		r.write_1D_ToFile(distancesComputed_s_e, folderName + "/meu.txt");
+		for (int i = 0; i < 10; i++) {
+			System.out.println(distancesComputed_r[i] + "\t" + distancesComputed_v[i] + 
+					"\t" + distancesComputed_d[i] + "\t" + distancesComputed_e[i] + 
+					"\t" + distancesComputed_u[i]);
+		}
 	}
 }
