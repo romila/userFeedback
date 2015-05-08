@@ -3,7 +3,6 @@ import java.util.*;
 public class accuPR {
 	private static final double t_0 = 0.8;
 	private final double delta 	= 0.001; // error threshold
-	private int	 		 numRounds 	= 5; // if 6 consecutive iterations result in the same values for all objects .. convergence
 	private int 		 iterations = 0;
 	private List<String> votes 		= new ArrayList<String>();
 	private double[][] 	 valueProbability;
@@ -15,6 +14,11 @@ public class accuPR {
 	
 	public double[] getSourceAccuracy(){
 		return this.sourceAccuracy;
+	}
+	
+	public void setSourceAccuracy(double[] accuracies){
+		for (int i = 0; i < accuracies.length; i++)
+			this.sourceAccuracy[i] = accuracies[i];
 	}
 	
 	public double[][] getValueProbability(){
@@ -116,21 +120,15 @@ public class accuPR {
         int 		 numFalseValues		 = Collections.max(numUniqueValuesArray) - 1; // excluding the true value
         double[] 	 sourceAccuracyPrev	 = new double[numSources];
 		List<String> currentObjectValues = new ArrayList<String>();
-		int 		 convergenceRounds 	 = 0;
 		double[]   	 valueConfidence  	 = new double[numFalseValues + 1];
 		double 	   	 sumValueProbability = 0;
 		int 	   	 countObjects		 = 0;
 		
-		this.valueProbability 	 = new double[numObjects][numFalseValues+1];
+		this.valueProbability 	 = new double[numObjects][numFalseValues + 1];
 		this.sourceAccuracy		 = new double[numSources];
 		Arrays.fill(this.sourceAccuracy, t_0);
 		Arrays.fill(sourceAccuracyPrev, -0.1);
-		
-		int[] 	 previousTrueValue 	=  new int[numObjects];
-		Arrays.fill(previousTrueValue, 1);
-		int[] 	 currentTrueValue    = new int[numObjects];
-		int[] 	 secondPreviousTrueValue = new int[numObjects];
-		
+				
 		List<Integer> truthIndices = new ArrayList<Integer>();
 		
 		int[] numberOfObjectsVoted = new int[numSources]; // #objects that a source voted for
@@ -154,23 +152,27 @@ public class accuPR {
 					else
 						this.valueProbability[currentObj][locationOfTrueValue] = 1;
 				}
+				
+				// change accuracies of sources that vote for this object 
+				for (int j = 0; j < numSources; j++) {
+					if (currentObjectValues.size() > j) {
+						if (currentObjectValues.get(j).equals(Integer.parseInt(indices.get(i).get(1))))
+							this.sourceAccuracy[j] += 0.1;
+						else
+							this.sourceAccuracy[j] -= 0.1;
+					}
+				}
+			}
 			
-//				for (int j = 0; j < numSources; j++) {
-//					if (dataTuples.get(currentObj).size() > j &&
-//							dataTuples.get(currentObj).get(j) != null) {
-//						if (indices.get(i).size() > 1) {
-//							if (dataTuples.get(currentObj).get(j).equals(indices.get(i).get(1)))
-//								this.sourceAccuracy[j] += (double)1/numberOfObjectsVoted[j];
-//							else
-//								this.sourceAccuracy[j] -= (double)1/numberOfObjectsVoted[j];
-//						}
-//					}
-//				}
+			for (int j = 0; j < numSources; j++) {
+				if (this.sourceAccuracy[j] > 1)
+					this.sourceAccuracy[j] = 1;
+				else if (this.sourceAccuracy[j] < 0)
+					this.sourceAccuracy[j] = 0;
 			}
 		}
 		
 		while (cosineSimilarity(sourceAccuracyPrev, this.sourceAccuracy) < 1 - this.delta) {
-//		while (convergenceRounds < this.numRounds) { 
 			this.iterations++;
 			sourceAccuracyPrev = this.sourceAccuracy.clone();
 			
@@ -217,23 +219,6 @@ public class accuPR {
 				}
 				this.sourceAccuracy[i] /= countObjects; 
 			}
-				
-			currentTrueValue   = getTrueValueIndices(this.valueProbability);
-
-			if(Arrays.equals(currentTrueValue, previousTrueValue))
-				convergenceRounds++;
-			else{
-				convergenceRounds = 0;
-			}
-			
-			previousTrueValue = currentTrueValue.clone();
 		}
-		
-//		for(int i=0; i<numObjects; i++){
-//			if(objectValues.get(i).size() > currentTrueValue[i])
-//				this.votes.add(objectValues.get(i).get(currentTrueValue[i]));
-//			else
-//				this.votes.add("");
-//		}
 	}
 }
