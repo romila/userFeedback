@@ -155,7 +155,8 @@ public class accuPR {
 				
 				// change accuracies of sources that vote for this object 
 				for (int j = 0; j < numSources; j++) {
-					if (currentObjectValues.size() > j) {
+					if (indices.get(i).size() > 1 && currentObjectValues.size() > j) {
+//						if (currentObjectValues.get(j).equals(indices.get(i).get(1)))
 						if (currentObjectValues.get(j).equals(Integer.parseInt(indices.get(i).get(1))))
 							this.sourceAccuracy[j] += 0.1;
 						else
