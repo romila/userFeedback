@@ -42,7 +42,7 @@ public class syntheticData {
 		Random r1 = new Random(System.currentTimeMillis());
 		
 		// (p x q) grid : generate n objects and m sources
-		int p = 100, q = 100;
+		int p = 19, q = 19;
 		String[][] grid = new String[2*p + 1][2*q + 1];
 		int n = 0, m = 0;
 		for (int i = 0; i < grid.length; i++) {
@@ -105,8 +105,8 @@ public class syntheticData {
 			data_row.removeAll(Collections.singleton(null));
 			List<String> objectValues = new ArrayList<String>(new HashSet<String>(data_row));
 			if (objectValues.size() < 2) {
-				String hasValue = objectValues.get(0); String putValue;
-				if (hasValue.equals(1)) // all values are 1
+				String hasValue = objectValues.get(0); String putValue = null;
+				if (hasValue.equals("1")) // all values are 1
 					putValue = Integer.toString(0);
 				else
 					putValue = Integer.toString(1);
@@ -197,8 +197,8 @@ public class syntheticData {
 	 */
 	public void randomDensity() throws IOException {
 		Random r1 = new Random(System.currentTimeMillis());
-		int n = 10000, m = 40;
-		double d = 0.2, a = 0.8;
+		int n = 1000, m = 10;
+		double d = 0.23, a = 0.8;
 		int source, object, countTotal = 0;
 		
 		String[][] data = new String[n][m];
@@ -210,7 +210,7 @@ public class syntheticData {
 			countTotal++;
 		}
 		
-		while ((double)countTotal/(m*n) < d) {
+		while (countTotal/(double)(m*n) < d) {
 			object = r1.nextInt(n);
 			source = r1.nextInt(m);
 			if (data[object][source] == null) {
@@ -220,38 +220,29 @@ public class syntheticData {
 		}
 		
 		for (int i = 0; i < n; i++) {
-//			for (int j = 0; j < m; j++) {
-//				if (data[i][j] == null) {
-//					if (r1.nextDouble() <= a)
-//						data[i][j] = Integer.toString(0);
-//					else
-//						data[i][j] = Integer.toString(1);
-//				}	
-//			}
-			
 			List<String> data_row = new ArrayList<String>(Arrays.asList(data[i]));
 			data_row.removeAll(Collections.singleton(null));
 			List<String> objectValues = new ArrayList<String>(new HashSet<String>(data_row));
 			if (objectValues.size() < 2) {
-				String hasValue = objectValues.get(0); String putValue;
-				if (hasValue.equals(1)) // all values are 1
+				String hasValue = objectValues.get(0); String putValue = null;
+				if (hasValue.equals("1")) // all values are 1
 					putValue = Integer.toString(0);
-				else
+				else if (hasValue.equals("0"))
 					putValue = Integer.toString(1);
 				int location = r1.nextInt(m); 
 				boolean placed = false;
 				while (!placed) {
 					if (data[i][location] == null) {
-						data[i][location] = putValue;
+						data[i][location] = String.valueOf(putValue);
 						placed = !placed;
 					}
 					else
 						location = r1.nextInt(m);
 				}
 			}
-			System.out.println(i);
 		}
 		
+		countTotal = 0;
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < m; j++) {
 				if (data[i][j] != null) 
@@ -259,17 +250,7 @@ public class syntheticData {
 			}
 		}
 		
-		System.out.println(m + "\t" + n + "\t" + (double)countTotal/(m*n));
-//		while ((double)countTotal/(m*n) < d) {
-//			object = r1.nextInt(n);
-//			source = r1.nextInt(m);
-//			if (data[object][source] == null) {
-//				data[object][source] = (r1.nextDouble() < a ? Integer.toString(0) : Integer.toString(1));
-//				countTotal++;
-//			}
-//		}
-		
-		System.out.println(m + "\t" + n + "\t" + (double)countTotal/(m*n));
+		System.out.println(m + "\t" + n + "\t" + (double)countTotal/(m*n));		
 		
 		writeToFile(data, "synthetic_data.txt");
 		writeToFile(truth, "synthetic_truth.txt");
