@@ -42,7 +42,7 @@ public class syntheticData {
 		Random r1 = new Random(System.currentTimeMillis());
 		
 		// (p x q) grid : generate n objects and m sources
-		int p = 19, q = 19;
+		int p = 21, q = 21;
 		String[][] grid = new String[2*p + 1][2*q + 1];
 		int n = 0, m = 0;
 		for (int i = 0; i < grid.length; i++) {
@@ -197,8 +197,8 @@ public class syntheticData {
 	 */
 	public void randomDensity() throws IOException {
 		Random r1 = new Random(System.currentTimeMillis());
-		int n = 1000, m = 10;
-		double d = 0.23, a = 0.8;
+		int n = 100, m = 10;
+		double d = 0.22, a = 0.8;
 		int source, object, countTotal = 0;
 		
 		String[][] data = new String[n][m];
@@ -250,7 +250,7 @@ public class syntheticData {
 			}
 		}
 		
-		System.out.println(m + "\t" + n + "\t" + (double)countTotal/(m*n));		
+		System.out.println(n + " objects \t" + m + " sources \t density: " + (double)countTotal/(m*n));		
 		
 		writeToFile(data, "synthetic_data.txt");
 		writeToFile(truth, "synthetic_truth.txt");
