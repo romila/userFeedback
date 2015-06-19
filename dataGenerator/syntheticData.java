@@ -42,7 +42,7 @@ public class syntheticData {
 		Random r1 = new Random(System.currentTimeMillis());
 		
 		// (p x q) grid : generate n objects and m sources
-		int p = 21, q = 21;
+		int p = 9, q = 9;
 		String[][] grid = new String[2*p + 1][2*q + 1];
 		int n = 0, m = 0;
 		for (int i = 0; i < grid.length; i++) {
@@ -79,17 +79,8 @@ public class syntheticData {
 		double[] accuracies = new double[m];
 		double initialAccuracy = 0.8;
 		Arrays.fill(accuracies, initialAccuracy);
-		double x = 0.02; // x% hubs
-		
-//		for (int i = 0; i < m; i++) {
-//			if (i < 600)
-//				accuracies[i] = 0.6;
-//			else if (i < 1200)
-//				accuracies[i] = 0.75;
-//			else
-//				accuracies[i] = 0.9;
-//		}
-		
+		double x = 0.05; // x% hubs
+			
 		String[][] data = new String[n][m];
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < m; j++) {
@@ -197,7 +188,7 @@ public class syntheticData {
 	 */
 	public void randomDensity() throws IOException {
 		Random r1 = new Random(System.currentTimeMillis());
-		int n = 100, m = 10;
+		int n = 1000, m = 10;
 		double d = 0.22, a = 0.8;
 		int source, object, countTotal = 0;
 		
@@ -258,8 +249,8 @@ public class syntheticData {
 	
 	public static void main(String[] args) throws IOException {
 		syntheticData g = new syntheticData();
-//		g.gridHubsDensity();
-		g.randomDensity();
+		g.gridHubsDensity();
+//		g.randomDensity();
 		
 		System.out.println("End");
 	}
