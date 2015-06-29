@@ -44,6 +44,8 @@ public class syntheticData {
 		// (p x q) grid : generate n objects and m sources
 		int p, q;	p = q = 31;
 		double x = 0.02; // x% hubs
+		double max = 1;
+		double min = 0.6;
 		String[][] grid = new String[2*p + 1][2*q + 1];
 		int n = 0, m = 0;
 		for (int i = 0; i < grid.length; i++) {
@@ -80,6 +82,8 @@ public class syntheticData {
 		double[] accuracies = new double[m];
 		double initialAccuracy = 0.8;
 		Arrays.fill(accuracies, initialAccuracy);
+//		for (int i = 0; i < m; i++) 
+//			accuracies[i] = r1.nextDouble() * (max - min) + min;
 			
 		String[][] data = new String[n][m];
 		for (int i = 0; i < n; i++) {
@@ -186,6 +190,23 @@ public class syntheticData {
 			}
 		}
 		System.out.println("Density after adding all edges = " + (double)countTotal/(m*n));
+		
+		double countZero = 0;
+		double countOne = 0;
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < m; j++) {
+				if (data[i][j] != null) {
+					if (data[i][j].equals("1"))
+						countOne++;
+					else
+						countZero++;
+				}
+			}
+		}
+		double c = countZero + countOne;
+		countZero /= c;
+		countOne /= c;
+		System.out.println("Zeroes: " + countZero + "\t Ones: " + countOne);
 	
 		writeToFile(data, "synthetic_data.txt");
 		writeToFile(truth, "synthetic_truth.txt");
@@ -195,7 +216,7 @@ public class syntheticData {
 	/*
 	 * function to generate synthetic random data
 	 */
-	public void randomDensity(int n, int m, double d, double a) throws IOException {
+	public void randomDensity(int n, int m, double d, double min, double max) throws IOException {
 		Random r1 = new Random(System.currentTimeMillis());
 		int source, object, countTotal = 0;
 		
@@ -208,11 +229,17 @@ public class syntheticData {
 			countTotal++;
 		}
 		
+		double[] accuracies = new double[m];
+		for (int i = 0; i < m; i++) {
+			accuracies[i] = r1.nextDouble() * (max - min) + min;
+			System.out.println(accuracies[i]);
+		}
+		
 		while (countTotal/(double)(m*n) < d) {
 			object = r1.nextInt(n);
 			source = r1.nextInt(m);
 			if (data[object][source] == null) {
-				data[object][source] = (r1.nextDouble() < a ? Integer.toString(0) : Integer.toString(1));
+				data[object][source] = (r1.nextDouble() < accuracies[source] ? Integer.toString(0) : Integer.toString(1));
 				countTotal++;
 			}
 		}
@@ -248,7 +275,7 @@ public class syntheticData {
 			}
 		}
 		
-		System.out.println(n + " objects \t" + m + " sources \t density: " + (double)countTotal/(m*n));		
+		System.out.println(n + " objects \t" + m + " sources \t density: " + (double)countTotal/(m*n));
 		
 		writeToFile(data, "synthetic_data.txt");
 		writeToFile(truth, "synthetic_truth.txt");
@@ -257,7 +284,7 @@ public class syntheticData {
 	public static void main(String[] args) throws IOException {
 		syntheticData g = new syntheticData();
 		g.gridHubsDensity();
-//		g.randomDensity(1000, 10, 0.22, 0.8);
+//		g.randomDensity(300, 10, 0.3, 0.6, 1);
 		
 		System.out.println("End");
 	}
