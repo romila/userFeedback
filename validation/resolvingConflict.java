@@ -6,17 +6,18 @@ public class resolvingConflict {
 	public List<List<String>> truthTuples;
 	public int numObjects;
 	public int numSources;
+	public int numFalseValues;
 	public List<List<String>> objectValues; // List of (List of different values for each object)
 	public int[] numberSourceVoted; // array containing the number of objects a source voted for
 	public accuPR basePredictor;
-	public int stepsize = 1;
-	public int stepForDistance = 1;
-	public int noOfObjectsToValidate = 20;
+	public int stepForDistance = 50;
+	public int noOfObjectsToValidate = 300;
 	public double acc_EM = 0.8;
-	public int numberOfHubs = 20;
+	public int numberOfHubs = 2;
+	public accuPR updated_EM;
+	public double baseUncertainty; 
 	
 	public resolvingConflict(String dataFile, String truthFile) throws IOException {
-		System.out.println("Class constructor");
 		this.dataTuples   = getTuplesFromFile (dataFile);
 		this.truthTuples  = getTuplesFromFile (truthFile);
 		
@@ -29,16 +30,19 @@ public class resolvingConflict {
 		this.numberSourceVoted = new int[this.numSources];
 		getObjectUniqueValues();
 		System.out.println("Running accuPR..");
+		
 		this.basePredictor = new accuPR (this.dataTuples, null);
+		this.baseUncertainty = this.computeDatabaseUncertainty(this.basePredictor.getValueProbability());
+		
 		System.out.println("accuPR converged");
-		System.out.println("distance to ground truth " + computeDistanceFromTruth(this.basePredictor));
+		System.out.println("distance to ground truth " + computeDistanceToTruth(this.basePredictor.getValueProbability()));
+		System.out.println("database uncertainty " + computeDatabaseUncertainty(this.basePredictor.getValueProbability()));
 	}
 	
 	/*
 	 * function to read tuples from a file
 	 */
 	public List<List<String>> getTuplesFromFile(String fileName) throws IOException {
-		System.out.println("Reading from file");
 		try (BufferedReader reader = new BufferedReader(new FileReader(fileName))) {
 			List<List<String>> fileTuples = new ArrayList<List<String>>();
 		    String line = reader.readLine();
@@ -79,6 +83,7 @@ public class resolvingConflict {
 	 */
 	public void getObjectUniqueValues() {
 		this.objectValues = new ArrayList<List<String>>();
+		List<Integer> numUniqueValuesArray = new ArrayList<Integer>();
 		for (int i = 0; i < this.numObjects; i++) {
 			ArrayList<String> objectUniqueValues = new ArrayList<String>();
 			for (int j = 0; j < this.dataTuples.get(i).size(); j++) {
@@ -89,7 +94,9 @@ public class resolvingConflict {
 			}
 			objectUniqueValues = new ArrayList<String>(new HashSet<String>(objectUniqueValues));
 			this.objectValues.add(objectUniqueValues);
+			numUniqueValuesArray.add(objectUniqueValues.size());
 		}
+		this.numFalseValues	 = Collections.max(numUniqueValuesArray) - 1; // excluding the true value
 	}
 	
 	/*
@@ -148,7 +155,7 @@ public class resolvingConflict {
 	 * conceptually, d* covers the entire distance but mathematically, while comparing two objects,
 	 * d and d* differ only by a factor of 2.
 	 */
-	public double computeDistanceFromTruth(accuPR t) {
+	public double computeDistanceToTruth(double[][] probabilities) {
 		double distance = 0;
 		int currentObject;
 		int locationOfTrueValue = 0;
@@ -162,21 +169,19 @@ public class resolvingConflict {
 				if (locationOfTrueValue == -1) // if none of the object values is true
 					distance += 1;
 				else
-					distance += Math.abs(1 - t.getValueProbability()[currentObject][locationOfTrueValue]);
+					distance += Math.abs(1 - probabilities[currentObject][locationOfTrueValue]);
 			}
 		}
-		distance /= this.truthTuples.size();
+		distance /= (double) this.truthTuples.size();
 		return distance;
 	}
 
 	/*
 	 * function to return the reduction in database uncertainty
 	 */
-	public double computeReductionInUncertainty(accuPR t) {
-		double distance = computeDatabaseUncertainty(t.getValueProbability());
-		double baseUncertainty = computeDatabaseUncertainty(this.basePredictor.getValueProbability());
-//		System.out.println(distance + "\t" + baseUncertainty);
-		return (distance - baseUncertainty)/baseUncertainty;
+	public double computeReductionInUncertainty(double[][] probabilities) {
+		double distance = computeDatabaseUncertainty(probabilities);
+		return (distance - this.baseUncertainty)/this.baseUncertainty;
 	}
 	
 	/*
@@ -193,6 +198,15 @@ public class resolvingConflict {
 		return dbUncertainty;
 	}
 		
+	/**
+	 * Returns probabilities after objects in indices have been validated
+	 * @param	indices				validated objects
+	 */
+	public double[][] updateEM( List<List<String>> indices){
+		this.updated_EM = new accuPR(this.dataTuples, indices);
+		return (this.updated_EM.getValueProbability());
+	}
+	
 	/*
 	 * function to compute validation by selecting object that results in minimum distance to ground truth
 	 * using ground truth
@@ -200,36 +214,38 @@ public class resolvingConflict {
 	public double[][] computeForMU() throws IOException {
 		System.out.println("MU");
 		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		List<List<String>> indices = new ArrayList<List<String>> ();
+		List<List<String>> tempIndices = new ArrayList<List<String>>();
+		int[] count = new int[2];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
+		
 		for (int i = 0; i < this.truthTuples.size(); i++) 
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, value true>
-		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
-		
-		accuPR tempPredictor	= this.basePredictor;
-		List<List<String>> tempIndices = new ArrayList<List<String>>();
 		while (indices.size() < this.noOfObjectsToValidate) {
 			double[] distances 	 = new double[tuplesNotValidated.size()];
 			for (int i = 0; i < tuplesNotValidated.size(); i++) {
+				tempIndices.clear();
 				for (int j = 0; j < indices.size(); j++)
 					tempIndices.add(indices.get(j));
-				tempIndices.add(this.truthTuples.get(tuplesNotValidated.get(i)));
-				accuPR	tempValidatedPredictor	= new accuPR(this.dataTuples, tempIndices);
-				distances[i] = - computeDistanceFromTruth(tempValidatedPredictor);
-				tempIndices.clear();
+				List<String> updatedIndex = this.truthTuples.get(tuplesNotValidated.get(i));
+				tempIndices.add(updatedIndex);
+				newProbabilities = this.updateEM(tempIndices);
+				distances[i] = - computeDistanceToTruth(newProbabilities);
 			}
-			
 			int[] ranks = sortAndRank(distances);
 			indices.add(this.truthTuples.get(tuplesNotValidated.get(ranks[0])));
-			tuplesNotValidated.remove(ranks[0]);
-			tempPredictor = new accuPR(this.dataTuples, indices);
+			
+			newProbabilities = this.updateEM(indices);
 			if (indices.size() % this.stepForDistance == 0) {
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
+			tuplesNotValidated.remove(ranks[0]);
 		}
-		
 		return distancesComputed;
 	}
 	
@@ -239,50 +255,55 @@ public class resolvingConflict {
 	public double[][]  computeForMEU() {
 		System.out.println("MEU");
 		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		int[] count = new int[2];
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		List<List<String>> indices = new ArrayList<List<String>> ();
+		List<List<String>> tempIndices = new ArrayList<List<String>>();
+		double[][] oldProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
+		
+		for (int i = 0; i < this.numObjects; i++)
+			System.arraycopy(this.basePredictor.getValueProbability()[i], 0, oldProbabilities[i], 0, this.numFalseValues + 1);
+		
 		for (int i = 0; i < this.truthTuples.size(); i++) 
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
-		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
-		
-		double[][] probabilities = new double[this.numObjects][2];
-		for (int i = 0; i < probabilities.length; i++)
-			probabilities[i] = Arrays.copyOf(this.basePredictor.getValueProbability()[i], 2);
-		
-		List<List<String>> tempIndices = new ArrayList<List<String>>();
 		while (indices.size() < this.noOfObjectsToValidate) {
 			double[] expectedUtility = new double[tuplesNotValidated.size()];
-			List<String> indexTuple = new ArrayList<String>();
 			
 			for (int i = 0; i < tuplesNotValidated.size(); i++) {
 				double tupleDBUncertainty = 0;
 				for (int j = 0; j < this.objectValues.get(tuplesNotValidated.get(i)).size(); j++) {
+					tempIndices.clear();
 					for (int k = 0; k < indices.size(); k++)
 						tempIndices.add(indices.get(k));
 					
-					indexTuple.clear();
-					indexTuple.add(Integer.toString(tuplesNotValidated.get(i))); 
-					indexTuple.add(this.objectValues.get(tuplesNotValidated.get(i)).get(j));
+					List<String> tempIndex = new ArrayList<String>();
+					tempIndex.add(Integer.toString(tuplesNotValidated.get(i))); 
+					tempIndex.add(this.objectValues.get(tuplesNotValidated.get(i)).get(j));
 					
-					tempIndices.add(indexTuple);
+					tempIndices.add(tempIndex);
 					
-					accuPR	tempValidatedPredictor	= new accuPR(this.dataTuples, tempIndices);
-					tupleDBUncertainty += probabilities[tuplesNotValidated.get(i)][j] * 
-											computeDatabaseUncertainty(tempValidatedPredictor.getValueProbability());
-					tempIndices.clear();
+					newProbabilities = this.updateEM(tempIndices);
+					tupleDBUncertainty += oldProbabilities[tuplesNotValidated.get(i)][j] * 
+											computeDatabaseUncertainty(newProbabilities);
 				}
 				expectedUtility[i] = - tupleDBUncertainty;
 			}
 			
 			int[] ranks = sortAndRank(expectedUtility); // object that results in maximum utility
 			indices.add(this.truthTuples.get(tuplesNotValidated.get(ranks[0])));
-			tuplesNotValidated.remove(ranks[0]);	
-			accuPR tempPredictor = new accuPR(this.dataTuples, indices); 
+			newProbabilities = this.updateEM(indices); 
 			if (indices.size() % this.stepForDistance == 0) {
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
+			
+			for (int k = 0; k < this.numObjects; k++) 
+				System.arraycopy(newProbabilities[k], 0, oldProbabilities[k], 0, this.numFalseValues + 1);
+			tuplesNotValidated.remove(ranks[0]);	
 		}
 				
 		return distancesComputed;
@@ -296,9 +317,10 @@ public class resolvingConflict {
 		List<List<String>> indices = new ArrayList<List<String>> (); // list of <index, true value>
 		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
 		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
 		Random random = new Random(System.currentTimeMillis());
-		accuPR tempPredictor;
 		
 		List<Integer> allTuples = new ArrayList<Integer> ();
 		for (int i = 0; i < this.truthTuples.size(); i++) { 
@@ -306,32 +328,32 @@ public class resolvingConflict {
 			allTuples.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		}
 		
-		for (int i = 0; i < numberOfRuns; i++) {
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		for (int k = 0; k < numberOfRuns; k++) {
 			indices.clear();
-			List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
 			
 			while (indices.size() < this.noOfObjectsToValidate) {
 					int index = random.nextInt(tuplesNotValidated.size());
-				    indices.add(this.truthTuples.get(truthIndices.indexOf(tuplesNotValidated.get(index))));
-				    tuplesNotValidated.remove(index);
-	
-				    tempPredictor = new accuPR(this.dataTuples, indices); 
+					List<String> updatedIndex = this.truthTuples.get(tuplesNotValidated.get(index));
+					indices.add(updatedIndex);
+				    
+					newProbabilities = this.updateEM(indices);
 					if (indices.size() % this.stepForDistance == 0) {
-				    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-				    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
-				    	System.out.println(distancesComputed[count[0]-1][0] + "\t" + distancesComputed[count[1]-1][1]);
+				    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+				    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 					}
+					tuplesNotValidated.remove(index);
 			}
 					
 			// again add all objects to unvalidated list for next run
 			tuplesNotValidated.clear();
 			for (int j = 0; j < allTuples.size(); j++)
-				tuplesNotValidated.add(allTuples.get(i));
+				tuplesNotValidated.add(allTuples.get(j));
 		}
 				
 		for (int i = 1; i < distancesComputed.length; i++) {
-			distancesComputed[i][0] /= numberOfRuns;
-			distancesComputed[i][1] /= numberOfRuns;
+			distancesComputed[i][0] /= (double) numberOfRuns;
+			distancesComputed[i][1] /= (double) numberOfRuns;
 		}
 		
 		return distancesComputed;
@@ -343,58 +365,52 @@ public class resolvingConflict {
 	 */
 	public double[][] computeForMVO() {
 		System.out.println("MVO");
-		double fraction = 0;
-		double countNotNull = 0;
-		int currentObject;
 		double[] objectEntropies = new double[this.truthTuples.size()];
-		List<String> currentValues = new ArrayList<String>();
 		
 		// get entropies of objects in the truthfile
 		for (int i = 0; i < this.truthTuples.size(); i++) {
-			currentObject = Integer.parseInt(this.truthTuples.get(i).get(0));
+			int currentObject = Integer.parseInt(this.truthTuples.get(i).get(0));
 			List<String> objectTupleList = this.dataTuples.get(currentObject);
-			countNotNull = objectTupleList.size() - Collections.frequency(objectTupleList, null);
+			int countNotNull = objectTupleList.size() - Collections.frequency(objectTupleList, null);
 			
-			currentValues = this.objectValues.get(currentObject);
+			List<String> currentValues = this.objectValues.get(currentObject);
 			
 			if (currentValues.size() > 1) {
 				for (int j = 0; j < currentValues.size(); j++) {
-					fraction = (double) Collections.frequency(objectTupleList, currentValues.get(j)) / countNotNull;
+					double fraction = (double) Collections.frequency(objectTupleList, currentValues.get(j)) / (double) countNotNull;
 					if (fraction > 0)
 						objectEntropies[i]  += - fraction * Math.log(fraction);
 				}
 			}
 		}
+		int[] entropyRanks = sortAndRank(objectEntropies); // sort objects in dec order of entropies	
 		
-		// sort objects in decreasing order of their entropies
-		int[] entropyRanks = sortAndRank(objectEntropies);		
-		accuPR tempPredictor;
-		
-		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
-		List<Integer> tuplesNotValidated = new ArrayList<Integer> ();
-		
-		for (int i = 0; i < this.truthTuples.size(); i++) 
+		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		for (int i = 0; i < this.truthTuples.size(); i++)
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
+		int[] count = new int[2];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
+		
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		List<List<String>> indices = new ArrayList<List<String>> ();
 		List<Integer> truthIndices = new ArrayList<Integer>(tuplesNotValidated);
-		while (indices.size() < this.noOfObjectsToValidate) {
-			int start = indices.size();
-			int end = start + this.stepsize;
-			for (int i = start; i < end; i++) {
-				indices.add(this.truthTuples.get(truthIndices.get(entropyRanks[i])));
-				tuplesNotValidated.remove(new Integer(entropyRanks[i]));
+		for (int i = 0; i < this.noOfObjectsToValidate; i++) {
+			List<String> updatedIndex = this.truthTuples.get(truthIndices.get(entropyRanks[i]));
+			indices.add(updatedIndex);
+			newProbabilities = this.updateEM(indices);
+			
+			if (indices.size() % this.stepForDistance == 0) {
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
 			
-			tempPredictor = new accuPR(this.dataTuples, indices);
-			if (indices.size() % this.stepForDistance == 0) {
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
-		    	System.out.println(distancesComputed[count[0]-1][0] + "\t" + distancesComputed[count[1]-1][1]);
-			}
+			tuplesNotValidated.remove(new Integer(entropyRanks[i]));
+			
 		}
-				
+			
 		return distancesComputed;
 	}
 	
@@ -408,45 +424,74 @@ public class resolvingConflict {
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
 		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
 		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
-		accuPR tempPredictor;
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
 		
-		double[][] probabilities = new double[this.numObjects][2];
-		for (int i = 0; i < probabilities.length; i++)
-			probabilities[i] = Arrays.copyOf(this.basePredictor.getValueProbability()[i], 2);
+		double[][] oldProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		for (int i = 0; i < this.numObjects; i++)
+			System.arraycopy(this.basePredictor.getValueProbability()[i], 0, oldProbabilities[i], 0, this.numFalseValues + 1);
 		
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
 		while (indices.size() < this.noOfObjectsToValidate) {
 			double[] obj_meu = new double[tuplesNotValidated.size()];
 			for (int i = 0; i < tuplesNotValidated.size(); i++)
-				for (int j = 0; j < probabilities[tuplesNotValidated.get(i)].length; j++)
-					if (probabilities[tuplesNotValidated.get(i)][j] > 0)
-						obj_meu[i] += - probabilities[tuplesNotValidated.get(i)][j] 
-								* Math.log(probabilities[tuplesNotValidated.get(i)][j]);
+				for (int j = 0; j < oldProbabilities[tuplesNotValidated.get(i)].length; j++)
+					if (oldProbabilities[tuplesNotValidated.get(i)][j] > 0)
+						obj_meu[i] += - oldProbabilities[tuplesNotValidated.get(i)][j] 
+								* Math.log(oldProbabilities[tuplesNotValidated.get(i)][j]);
 				
 			int[] deltaRanks = sortAndRank(obj_meu);
 
-			List<Integer> toDelete = new ArrayList<Integer>();
-			for (int i = 0; i < this.stepsize; i++) {
-				indices.add(this.truthTuples.get(tuplesNotValidated.get(deltaRanks[i])));
-				toDelete.add(tuplesNotValidated.get(deltaRanks[i]));
-			}
-			
-			for (int i = 0; i < toDelete.size(); i++) 
-				tuplesNotValidated.remove(new Integer(toDelete.get(i)));
+			List<String> updatedIndex = this.truthTuples.get(tuplesNotValidated.get(deltaRanks[0]));
+			indices.add(updatedIndex);
+			tuplesNotValidated.remove(deltaRanks[0]);
 					
-			tempPredictor = new accuPR(this.dataTuples, indices);
+			newProbabilities = this.updateEM(indices);
 			if (indices.size() % this.stepForDistance == 0) {
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
+				distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
 			
-			for (int k = 0; k < tuplesNotValidated.size(); k++)
-				probabilities[tuplesNotValidated.get(k)] = 
-					Arrays.copyOf(tempPredictor.getValueProbability()[tuplesNotValidated.get(k)], 2);
+			for (int k = 0; k < this.numObjects; k++) 
+				System.arraycopy(newProbabilities[k], 0, oldProbabilities[k], 0, this.numFalseValues + 1);
 		}
 		
 		return distancesComputed;
+	}
+	
+	/*
+	 * function to get #objectsToValidate most central objects according to 1-hop score
+	 */
+	public List<Integer> getHubs(List<Integer> tuplesNotValidated) {
+		double[] centralities = new double[tuplesNotValidated.size()];
+		List<List<Integer>> neighbors = new ArrayList<List<Integer>>();
+		for (int i = 0; i < this.numObjects; i++) {
+			List<Integer> objNeighbor = new ArrayList<Integer>();
+			for (int j = 0; j < this.numObjects; j++) {
+				for (int k = 0; k < this.numSources; k++) {
+					if (i != j &&
+						this.dataTuples.get(i).size() > k &&
+						this.dataTuples.get(j).size() > k &&
+						this.dataTuples.get(i).get(k) != null &&
+						this.dataTuples.get(j).get(k) != null) { 
+						objNeighbor.add(j);
+						break;
+					}
+				}
+			}
+			neighbors.add(objNeighbor);
+			centralities[i] = objNeighbor.size(); // centrality is number of objects affected
+//			System.out.println("Centrality of " + i + "\t" + centralities[i]);
+		}
+		
+		int[] newRanks = sortAndRank(centralities);
+		List<Integer> hubs = new ArrayList<Integer>();
+		for (int i = 0; i < this.noOfObjectsToValidate; i++)
+			hubs.add(newRanks[i]);
+		
+		return hubs;
 	}
 	
 	/*
@@ -459,32 +504,22 @@ public class resolvingConflict {
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
 		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
 		
-		// rank objects according to 1-hop centrality scores.
-		double[] newCentralities = new double[tuplesNotValidated.size()];
-		for (int i = 0; i < tuplesNotValidated.size(); i++)
-			for (int j = 0; j < this.dataTuples.get(i).size(); j++)
-				if (this.dataTuples.get(i).get(j) != null)  
-					newCentralities[i] += this.numberSourceVoted[j];
+		List<Integer> hubs = getHubs(tuplesNotValidated);
 		
-		int[] newRanks = sortAndRank(newCentralities);
-		List<Integer> hubs = new ArrayList<Integer>();
-		for (int i = 0; i < this.noOfObjectsToValidate; i++)
-			hubs.add(newRanks[i]);
-		
-		for (int i = 0; i < this.noOfObjectsToValidate; i++)
-			System.out.println(newCentralities[i]);
-		
-		accuPR tempPredictor;
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
 		List<List<String>> indices = new ArrayList<List<String>> ();
 		for (int i = 0; i < this.noOfObjectsToValidate; i++) {
-			indices.add(this.truthTuples.get(hubs.get(i)));
-						
-			tempPredictor = new accuPR(this.dataTuples, indices); 
+			List<String> updatedIndex = this.truthTuples.get(hubs.get(i));
+			indices.add(updatedIndex);
+			
+			newProbabilities = this.updateEM(indices);
 			if (indices.size() % this.stepForDistance == 0) {
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
 		}
 		return distancesComputed;
@@ -501,6 +536,8 @@ public class resolvingConflict {
 		double[] combination = new double[4]; 
 		double fraction = 0;
 		
+		
+		// ------------ TO BE UPDATED WITH WITH UPDATED SOURCE ACCURACIES
 		for (int i = 0; i < this.numSources; i++) {
 			if (aValues.size() > i && bValues.size() >i &&
 					aValues.get(i) != null && bValues.get(i) != null) {
@@ -622,109 +659,100 @@ public class resolvingConflict {
 	 */
 	public double[][] approxNetworkMEU() {
 		System.out.println("approx-Network-MEU");
+		int[] count = new int[2];
 		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
+		double[][] oldProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
+		
 		for (int i = 0; i < this.truthTuples.size(); i++) 
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
-		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
-		accuPR tempPredictor;
+		for (int i = 0; i < this.numObjects; i++)
+			System.arraycopy(this.basePredictor.getValueProbability()[i], 0, oldProbabilities[i], 0, this.numFalseValues + 1);
 		
-		double[][] probabilities = new double[this.numObjects][2];
-		for (int i = 0; i < probabilities.length; i++)
-			probabilities[i] = Arrays.copyOf(this.basePredictor.getValueProbability()[i], 2);
-			
-		// rank objects according to 1-hop centrality scores.
-		double[] newCentralities = new double[tuplesNotValidated.size()];
-		for (int i = 0; i < tuplesNotValidated.size(); i++)
-			for (int j = 0; j < this.dataTuples.get(i).size(); j++)
-				if (this.dataTuples.get(i).get(j) != null)  
-					newCentralities[i] += this.numberSourceVoted[j];
-			
-		int[] newRanks = sortAndRank(newCentralities);
-		List<Integer> hubs = new ArrayList<Integer>();
-		for (int i = 0; i < this.numberOfHubs; i++)
-			hubs.add(newRanks[i]);
-		
-		double[][] tempProbabilities = new double[this.numObjects][2];
-		System.out.println("Estimated uncertainty reduction \t Q(E)");
 		while (indices.size() < this.noOfObjectsToValidate) {
-			if(indices.size() < this.numberOfHubs) {
-				indices.add(this.truthTuples.get(hubs.get(0)));
-				List<Integer> toDelete = new ArrayList<Integer>();
-				toDelete.add(hubs.get(0));
-				for (int j = 0; j < toDelete.size(); j++) {
-					hubs.remove(new Integer(toDelete.get(j)));
-					tuplesNotValidated.remove(new Integer(toDelete.get(j)));
+			double[] sourceVotes = new double[this.numSources];
+			for (int i = 0; i < this.numSources; i++) {
+				if (this.numberSourceVoted[i] < 2)
+					sourceVotes[i] = Integer.MAX_VALUE;
+				else
+					sourceVotes[i] = this.numberSourceVoted[i];
+			}
+			
+			int[] sourceRanks = sortAndRank(sourceVotes);
+			List<Integer> potentialCandidates = new ArrayList<Integer>();
+			
+			for (int i = this.numSources - 1; i >= (int) (this.numSources * 0.67); i--) {
+				int source = sourceRanks[i];
+				for (int j = 0; j < this.numObjects; j++) 
+					if (tuplesNotValidated.contains(j) && this.dataTuples.get(j).size() > source &&
+							this.dataTuples.get(j).get(source) != null)
+						potentialCandidates.add(j);
+			}
+			potentialCandidates = new ArrayList<Integer>(new HashSet<Integer>(potentialCandidates));
+			System.out.println(potentialCandidates.size());
+			
+			double[] db_uncertainties = new double[potentialCandidates.size()];
+			for (int i = 0; i < potentialCandidates.size(); i++) {
+				int iobj = potentialCandidates.get(i);
+				
+				double[][] tempProbabilities = new double[this.numObjects][2];
+				for (int k = 0; k < this.numObjects; k++)
+					System.arraycopy(oldProbabilities[k], 0, tempProbabilities[k], 0, this.numFalseValues + 1);
+				
+				for (int j = 0; j < tuplesNotValidated.size(); j++) {
+					int jobj = tuplesNotValidated.get(j);
+					if (iobj != jobj && this.haveCommonSource(iobj, jobj))
+						System.arraycopy(getDelta(iobj, jobj, tempProbabilities[iobj], tempProbabilities[jobj]), 
+								0, tempProbabilities[jobj], 0, this.numFalseValues + 1);
 				}
+				Arrays.fill(tempProbabilities[iobj], 0);
+				
+				db_uncertainties[i] +=  this.computeDatabaseUncertainty(tempProbabilities) 
+						- this.computeDatabaseUncertainty(oldProbabilities); 
+				db_uncertainties[i] /= this.computeDatabaseUncertainty(oldProbabilities);
+				
+				db_uncertainties[i] *= -1;
+				if (db_uncertainties[i] < 0.001)
+					db_uncertainties[i] = 0;
+			}
+				
+			int[] deltaRanks = sortAndRank(db_uncertainties);
+			
+			List<String> updatedIndex = new ArrayList<String>();
+			if (db_uncertainties[0] > 0) {
+				updatedIndex = this.truthTuples.get(potentialCandidates.get(deltaRanks[0])); 
+				Integer deleteObject = potentialCandidates.get(deltaRanks[0]);
+				potentialCandidates.remove(new Integer(deleteObject));
+				tuplesNotValidated.remove(new Integer(deleteObject));
 			}
 			else {
-				double[] db_uncertainties = new double[tuplesNotValidated.size()];
 				double[] meu_obj = new double[tuplesNotValidated.size()] ;
-				for (int i = 0; i < tuplesNotValidated.size(); i++) {
-					tempProbabilities = new double[this.numObjects][2];
-					for (int k = 0; k < this.numObjects; k++) 
-						tempProbabilities[k] = Arrays.copyOf(probabilities[k], 2);
-				
-					int iobj = tuplesNotValidated.get(i);
-					for (int j = 0; j < tuplesNotValidated.size(); j++) {
-						int jobj = tuplesNotValidated.get(j);
-						if (iobj != jobj && this.haveCommonSource(iobj, jobj))
-							tempProbabilities[jobj] = Arrays.copyOf(getDelta(iobj, jobj, 
-								tempProbabilities[iobj], tempProbabilities[jobj]), 2);
-					}
-					Arrays.fill(tempProbabilities[iobj], 0);
-					
-					for (int j = 0; j < probabilities[iobj].length; j++)
-						if (probabilities[iobj][j] > 0)
-							meu_obj[i] += - probabilities[iobj][j] * Math.log(probabilities[iobj][j]);
-					
-					db_uncertainties[i] +=  this.computeDatabaseUncertainty(tempProbabilities)
-							- this.computeDatabaseUncertainty(probabilities);
-					db_uncertainties[i] /= this.computeDatabaseUncertainty(probabilities);
-					
-					db_uncertainties[i] *= -1;
-					if (db_uncertainties[i] < 0.001)
-						db_uncertainties[i] = 0;
+				for (int k = 0; k < tuplesNotValidated.size(); k++) {
+					int iobj = tuplesNotValidated.get(k);
+					for (int j = 0; j < oldProbabilities[iobj].length; j++)
+						if (oldProbabilities[iobj][j] > 0)
+							meu_obj[k] += - oldProbabilities[iobj][j] * Math.log(oldProbabilities[iobj][j]);
 				}
-					
-				int[] deltaRanks = sortAndRank(db_uncertainties);
 				int[] meuRanks = sortAndRank(meu_obj);
-
-				List<Integer> toDelete = new ArrayList<Integer>();
-				for (int i = 0; i < this.stepsize; i++) {
-					if (db_uncertainties[i] > 0) {
-						indices.add(this.truthTuples.get(tuplesNotValidated.get(deltaRanks[i])));
-						toDelete.add(tuplesNotValidated.get(deltaRanks[i]));
-					}
-					else {
-						indices.add(this.truthTuples.get(tuplesNotValidated.get(meuRanks[i])));
-						toDelete.add(tuplesNotValidated.get(meuRanks[i]));
-					}
-					
-					for (int j = 0; j < this.numSources; j++) 
-						if (this.dataTuples.get(tuplesNotValidated.get(i)).size() > j &&
-								this.dataTuples.get(tuplesNotValidated.get(i)).get(j) != null)
-							this.numberSourceVoted[j]--;
-				}
-				
-				for (int i = 0; i < toDelete.size(); i++) 
-					tuplesNotValidated.remove(new Integer(toDelete.get(i)));
+				System.out.println("added from meu_o");
+				updatedIndex = this.truthTuples.get(potentialCandidates.get(deltaRanks[0])); 
+				Integer deleteObject = tuplesNotValidated.get(meuRanks[0]);
+				tuplesNotValidated.remove(new Integer(deleteObject));
 			}
 			
-			tempPredictor = new accuPR(this.dataTuples, indices);
-			this.basePredictor.setSourceAccuracy(tempPredictor.getSourceAccuracy());
-			
+			indices.add(updatedIndex);
+			newProbabilities = this.updateEM(indices);
 			if (indices.size() % this.stepForDistance == 0) {
-//				this.qualityOfEstimates(probabilities, tempPredictor.getValueProbability(), indices);
-				distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
-		    	System.out.println(distancesComputed[count[0]-1][0] + "\t" + distancesComputed[count[1]-1][1]);
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
-			
-			for (int k = 0; k < this.numObjects; k++)
-				probabilities[k] = Arrays.copyOf(tempPredictor.getValueProbability()[k], 2);
+			for (int k = 0; k < this.numObjects; k++) 
+				System.arraycopy(newProbabilities[k], 0, oldProbabilities[k], 0, this.numFalseValues + 1);
 		}
 		return distancesComputed;
 	}
@@ -736,8 +764,8 @@ public class resolvingConflict {
 			List<List<String>> indices) {
 		double[][] tempProbabilities = new double[this.numObjects][2];
 		for (int j = 0; j < this.numObjects; j++)
-			tempProbabilities[j] = Arrays.copyOf(probabilities[j], 2);
-		
+			System.arraycopy(probabilities[j], 0, tempProbabilities[j], 0, this.numFalseValues + 1);
+			
 		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
 		for (int i = 0; i < this.truthTuples.size(); i++) 
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
@@ -749,8 +777,8 @@ public class resolvingConflict {
 		for (int j = 0; j < tuplesNotValidated.size(); j++) {
 			int jobj = tuplesNotValidated.get(j);
 			if (iobj != jobj)
-				tempProbabilities[jobj] = Arrays.copyOf(getDelta(iobj, jobj,
-						tempProbabilities[iobj], tempProbabilities[jobj]), 2);
+				System.arraycopy(getDelta(iobj, jobj, tempProbabilities[iobj], tempProbabilities[jobj]), 
+						0, tempProbabilities[jobj], 0, this.numFalseValues + 1);
 		}
 		
 		double abs_distance = 0;
@@ -760,7 +788,7 @@ public class resolvingConflict {
 					abs_distance += Math.abs(tempProbabilities[i][0] - actualProbabilities[i][0]) +
 					Math.abs(tempProbabilities[i][1] - actualProbabilities[i][1]);
 		
-		abs_distance /= this.numObjects;
+		abs_distance /= (double) this.numObjects;
 		
 		System.out.println((this.computeDatabaseUncertainty(tempProbabilities) - 
 				this.computeDatabaseUncertainty(this.basePredictor.getValueProbability()))/
@@ -773,45 +801,40 @@ public class resolvingConflict {
 	 */
 	public double[][] approxMEU() {
 		System.out.println("approxMEU");
+		int[] count = new int[2];
 		List<Integer> tuplesNotValidated = new ArrayList<Integer>();
+		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
+		double[][] oldProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		double[][] newProbabilities = new double[this.numObjects][this.numFalseValues + 1];
+		double[][] distancesComputed = new double[this.noOfObjectsToValidate/this.stepForDistance + 1][2];
+		distancesComputed[count[0]++][0] += computeDistanceToTruth(this.basePredictor.getValueProbability());
+    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(this.basePredictor.getValueProbability());
+		
 		for (int i = 0; i < this.truthTuples.size(); i++) 
 			tuplesNotValidated.add(Integer.parseInt(this.truthTuples.get(i).get(0)));
 		
-		int[] count = new int[2];
-		double[][] distancesComputed = new double[this.numObjects/this.stepsize + 1][2];
-		List<List<String>> indices = new ArrayList<List<String>> (); // <index, true value>
-		accuPR tempPredictor;
+		for (int i = 0; i < this.numObjects; i++)
+			System.arraycopy(this.basePredictor.getValueProbability()[i], 0, oldProbabilities[i], 0, this.numFalseValues + 1);
 		
-		double[][] probabilities = new double[this.numObjects][2];
-		for (int i = 0; i < probabilities.length; i++)
-			probabilities[i] = Arrays.copyOf(this.basePredictor.getValueProbability()[i], 2);
-		
-//		System.out.println("Estimated uncertainty reduction \t Q(E)");
-		long t1 = System.currentTimeMillis();
 		while (indices.size() < this.noOfObjectsToValidate) {
 			double[] db_uncertainties = new double[tuplesNotValidated.size()];
-			double[] meu_obj = new double[tuplesNotValidated.size()] ;
 			for (int i = 0; i < tuplesNotValidated.size(); i++) {
 				double[][] tempProbabilities = new double[this.numObjects][2];
-				for (int k = 0; k < this.numObjects; k++) 
-					tempProbabilities[k] = Arrays.copyOf(probabilities[k], 2);
-			
+				for (int k = 0; k < this.numObjects; k++)
+					System.arraycopy(oldProbabilities[k], 0, tempProbabilities[k], 0, this.numFalseValues + 1);
+					
 				int iobj = tuplesNotValidated.get(i);
 				for (int j = 0; j < tuplesNotValidated.size(); j++) {
 					int jobj = tuplesNotValidated.get(j);
 					if (iobj != jobj && this.haveCommonSource(iobj, jobj))
-						tempProbabilities[jobj] = Arrays.copyOf(getDelta(iobj, jobj, 
-							tempProbabilities[iobj], tempProbabilities[jobj]), 2);
+						System.arraycopy(getDelta(iobj, jobj, tempProbabilities[iobj], tempProbabilities[jobj]), 
+								0, tempProbabilities[jobj], 0, this.numFalseValues + 1);
 				}
 				Arrays.fill(tempProbabilities[iobj], 0);
 				
-				for (int j = 0; j < probabilities[iobj].length; j++)
-					if (probabilities[iobj][j] > 0)
-						meu_obj[i] += - probabilities[iobj][j] * Math.log(probabilities[iobj][j]);
-				
 				db_uncertainties[i] +=  this.computeDatabaseUncertainty(tempProbabilities)
-						- this.computeDatabaseUncertainty(probabilities);
-				db_uncertainties[i] /= this.computeDatabaseUncertainty(probabilities);
+						- this.computeDatabaseUncertainty(oldProbabilities);
+				db_uncertainties[i] /= this.computeDatabaseUncertainty(oldProbabilities);
 				
 				db_uncertainties[i] *= -1;
 				if (db_uncertainties[i] < 0.001)
@@ -819,45 +842,36 @@ public class resolvingConflict {
 			}
 				
 			int[] deltaRanks = sortAndRank(db_uncertainties);
-			int[] meuRanks = sortAndRank(meu_obj);
+			
+			List<String> updatedIndex;
+			if (db_uncertainties[0] > 0) {
+					updatedIndex = this.truthTuples.get(tuplesNotValidated.get(deltaRanks[0])); 
+					tuplesNotValidated.remove(deltaRanks[0]);
+			}
+			else{
+				double[] meu_obj = new double[tuplesNotValidated.size()] ;
+				for (int k = 0; k < tuplesNotValidated.size(); k++) {
+					int iobj = tuplesNotValidated.get(k);
+					for (int j = 0; j < oldProbabilities[iobj].length; j++)
+						if (oldProbabilities[iobj][j] > 0)
+							meu_obj[k] += - oldProbabilities[iobj][j] * Math.log(oldProbabilities[iobj][j]);
+				}
+				int[] meuRanks = sortAndRank(meu_obj);
 
-			List<Integer> toDelete = new ArrayList<Integer>();
-			for (int i = 0; i < this.stepsize; i++) {
-				if (db_uncertainties[i] > 0) {
-					indices.add(this.truthTuples.get(tuplesNotValidated.get(deltaRanks[i])));
-					toDelete.add(tuplesNotValidated.get(deltaRanks[i]));
-				}
-				else {
-					System.out.println("added from meu_o");
-					indices.add(this.truthTuples.get(tuplesNotValidated.get(meuRanks[i])));
-					toDelete.add(tuplesNotValidated.get(meuRanks[i]));
-				}
-				
-				for (int j = 0; j < this.numSources; j++) 
-					if (this.dataTuples.get(tuplesNotValidated.get(i)).size() > j &&
-							this.dataTuples.get(tuplesNotValidated.get(i)).get(j) != null)
-						this.numberSourceVoted[j]--;
+				System.out.println("added from meu_o");
+				updatedIndex = this.truthTuples.get(tuplesNotValidated.get(meuRanks[0]));
+				tuplesNotValidated.remove(meuRanks[0]);
 			}
-			long t2 = System.currentTimeMillis();
-			System.out.println((t2 - t1)/(double)(1000 * this.noOfObjectsToValidate));
 			
-			for (int i = 0; i < toDelete.size(); i++) 
-				tuplesNotValidated.remove(new Integer(toDelete.get(i)));
-		
-			tempPredictor = new accuPR(this.dataTuples, indices);
-			this.basePredictor.setSourceAccuracy(tempPredictor.getSourceAccuracy());
-			
+			indices.add(updatedIndex);
+			newProbabilities = this.updateEM(indices);
 			if (indices.size() % this.stepForDistance == 0) {
-//				this.qualityOfEstimates(probabilities, tempPredictor.getValueProbability(), indices);
-		    	distancesComputed[count[0]++][0] += computeDistanceFromTruth(tempPredictor);
-		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(tempPredictor);
-		    	System.out.println(distancesComputed[count[0]-1][0] + "\t" + distancesComputed[count[1]-1][1]);
+		    	distancesComputed[count[0]++][0] += computeDistanceToTruth(newProbabilities);
+		    	distancesComputed[count[1]++][1] += computeReductionInUncertainty(newProbabilities);
 			}
-			
-			for (int k = 0; k < this.numObjects; k++)
-				probabilities[k] = Arrays.copyOf(tempPredictor.getValueProbability()[k], 2);
+			for (int k = 0; k < this.numObjects; k++) 
+				System.arraycopy(newProbabilities[k], 0, oldProbabilities[k], 0, this.numFalseValues + 1);
 		}
-		
 		return distancesComputed;
 	}
 	
@@ -873,34 +887,35 @@ public class resolvingConflict {
 		int numberOfRuns_s = 1; // for random experiment, how many times to simulate
 		long t1 = System.currentTimeMillis();
 		
-//		double[][] distancesComputed_r = r.computeForRandomSelection(numberOfRuns_s);
-//		long t2 = System.currentTimeMillis();
-//		double[][] distancesComputed_u = r.computeForMU();
-//		long t3 = System.currentTimeMillis();
-//		double[][] distancesComputed_e = r.computeForMEU();
-//		long t4 = System.currentTimeMillis();
-//		double[][] distancesComputed_v = r.computeForMVO();
-//		long t5 = System.currentTimeMillis();
-//		double[][] distancesComputed_o = r.computeForObjectMEU();
-//		long t6 = System.currentTimeMillis();
+		double[][] distancesComputed_r = r.computeForRandomSelection(numberOfRuns_s);
+		long t2 = System.currentTimeMillis();
+		double[][] distancesComputed_u = r.computeForMU();
+		long t3 = System.currentTimeMillis();
+		double[][] distancesComputed_e = r.computeForMEU();
+		long t4 = System.currentTimeMillis();
+		double[][] distancesComputed_v = r.computeForMVO();
+		long t5 = System.currentTimeMillis();
+		double[][] distancesComputed_o = r.computeForObjectMEU();
+		long t6 = System.currentTimeMillis();
 		double[][] distancesComputed_cc = r.computeForCentrality();
-//		double[][] distancesComputed_a = r.approxMEU();
-//		long t7 = System.currentTimeMillis();
+		long t7 = System.currentTimeMillis();
+		double[][] distancesComputed_a = r.approxMEU();
 //		double[][] distancesComputed_n = r.approxNetworkMEU();
+		long t8 = System.currentTimeMillis();
 		
 		// dummies
-		double[][] distancesComputed_u = new double[101][2];
-		double[][] distancesComputed_e = new double[101][2];
-		double[][] distancesComputed_r = new double[101][2];
-		double[][] distancesComputed_v = new double[101][2];
-		double[][] distancesComputed_a = new double[101][2];
-		double[][] distancesComputed_o = new double[101][2];
+//		double[][] distancesComputed_u = new double[101][2];
+//		double[][] distancesComputed_e = new double[101][2];
+//		double[][] distancesComputed_r = new double[101][2];
+//		double[][] distancesComputed_v = new double[101][2];
+//		double[][] distancesComputed_o = new double[101][2];
+//		double[][] distancesComputed_a = new double[101][2];
 //		double[][] distancesComputed_cc = new double[101][2];
 		double[][] distancesComputed_n = new double[101][2];
 		
 		System.out.println("Effectiveness");
 		System.out.printf("Random\tMU\tMEU\tMVO\tMEU_o\tCentrality\tapprox-MEU\tnetwork-approx-MEU\n");
-		for (int i = 0; i < r.noOfObjectsToValidate/r.stepForDistance; i++) 
+		for (int i = 0; i < r.noOfObjectsToValidate/r.stepForDistance + 1; i++) 
 			System.out.printf("%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n", 
 					distancesComputed_r[i][0], distancesComputed_u[i][0], distancesComputed_e[i][0], 
 					distancesComputed_v[i][0], distancesComputed_o[i][0], distancesComputed_cc[i][0], 
@@ -908,15 +923,19 @@ public class resolvingConflict {
 		
 		System.out.println("\nReduction in uncertainty");
 		System.out.printf("Random\tMU\tMEU\tMVO\tMEU_o\tCentrality\tapprox-MEU\tnetwork-approx-MEU\n");
-		for (int i = 0; i < r.noOfObjectsToValidate/r.stepForDistance; i++) 
+		for (int i = 0; i < r.noOfObjectsToValidate/r.stepForDistance + 1; i++) 
 			System.out.printf("%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n", 
 					distancesComputed_r[i][1], distancesComputed_u[i][1], distancesComputed_e[i][1], 
 					distancesComputed_v[i][1], distancesComputed_o[i][1], distancesComputed_cc[i][1], 
 					distancesComputed_a[i][1], distancesComputed_n[i][1]);
 	
-//		System.out.println("Efficiency");
-//		System.out.println((t4 - t1)/(double)(1000 * r.noOfObjectsToValidate) + "\t" + 
-//				(t4 - t4)/(double)(1000 * r.noOfObjectsToValidate) + "\t" +
-//				(t4 - t4)/(double)(1000 * r.noOfObjectsToValidate) + "\t"); 
+		System.out.println("Efficiency");
+		System.out.println((t2 - t1)/(double)(1000 * r.noOfObjectsToValidate) + "\t" + 
+				(t3 - t2)/(double)(1000 * r.noOfObjectsToValidate) + "\t" +
+				(t4 - t3)/(double)(1000 * r.noOfObjectsToValidate) + "\t" +
+				(t5 - t4)/(double)(1000 * r.noOfObjectsToValidate) + "\t" +
+				(t6 - t5)/(double)(1000 * r.noOfObjectsToValidate) + "\t" + 
+				(t7 - t6)/(double)(1000 * r.noOfObjectsToValidate) + "\t" +
+				(t8 - t7)/(double)(1000 * r.noOfObjectsToValidate) + "\t");
 	}
 }
