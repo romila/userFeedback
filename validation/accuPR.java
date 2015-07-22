@@ -1,76 +1,42 @@
 import java.util.*;
 
 public class accuPR {
-	public static final double initialAccuracy = 0.8;
+	public final double initialAccuracy = 0.8;
 	public final double delta 	= 0.001; // error threshold
-	public int 		 iterations = 0;
-	public List<String> votes 		= new ArrayList<String>();
-	public double[][] 	 valueProbability;
-	public double[] 	 sourceAccuracy;
+	public int iterations = 0;
+	public double[][] valueProbability;
+	public double[] sourceAccuracy;
 	
-	public List<String> getVotes(){
-		return this.votes;
-	}
-	
+	/**
+	 * Returns array of source accuracies
+	 * @return		double array of source accuracies
+	 */
 	public double[] getSourceAccuracy(){
 		return this.sourceAccuracy;
 	}
 	
+	/**
+	 * Sets source accuracies to given values
+	 * @param accuracies	set sources accuracies to values in this array
+	 */
 	public void setSourceAccuracy(double[] accuracies){
 		for (int i = 0; i < accuracies.length; i++)
 			this.sourceAccuracy[i] = accuracies[i];
 	}
 	
+	/**
+	 * Returns value probabilities of all objects
+	 * @return		probabilities of all values of all objects
+	 */
 	public double[][] getValueProbability(){
 		return this.valueProbability;
 	}
 	
-	public int getIterations(){
-		return this.iterations;
-	}
-	
-	/*
-	 *  function to round value to N decimal places
-	 */
-	public static double roundToN(double value, int n){
-		return (double)Math.round(value * Math.pow(10, n)) / Math.pow(10, n);
-	}
-	
-	/*
-	 *  function to return indices of true values for all objects
-	 */
-	public static int[] getTrueValueIndices(double[][] a){
-		int[] trueValues = new int[a.length];
-		double max = 0;
-		int index = 0;
-	
-		for(int i=0; i<a.length; i++){
-			max = 0; index = 0;
-			for(int j=a[i].length - 1; j>=0; j--){
-				if(a[i][j] > max){
-					max = a[i][j];
-					index = j;
-				}
-			}
-			trueValues[i] = index;				
-		}
-		return trueValues;
-	}
-
-	/* 
-	 * function to count number of different elements in two arrays
-	 */
-	public static int countNumberDifferent(int[] a, int[] b){
-		int countDiff = 0;
-		for(int i=0; i<a.length; i++){
-			if(a[i] != b[i])
-				countDiff++;
-		}
-		return countDiff;
-	}
-	
-	/* 
-	 * function to return cosine similarity between two vectors
+	/**
+	 * Returns cosine similarity of two vectors
+	 * @param a	first vector
+	 * @param b	second vector
+	 * @return	cos(a,b)
 	 */
 	public double cosineSimilarity(double[] a, double[] b) {
 		double distance = 0; double sumA = 0; double sumB = 0;
@@ -83,16 +49,22 @@ public class accuPR {
 		return distance;
 	}
 	
-	public int returnNumberOfSources(List<List<String>> dataTuples){
+	/**
+	 * Returns number of sources in the dataset
+	 * @param dataTuples	dataset representing votes of objects by sources
+	 * @return				number of sources
+	 */
+	public int numberOfSources(List<List<String>> dataTuples){
 		List<Integer> numSourcesObjects = new ArrayList<Integer>();
 		for(int i=0; i<dataTuples.size(); i++)
 			numSourcesObjects.add(dataTuples.get(i).size());
 		return Collections.max(numSourcesObjects);
 	}
 	
-	/* 
-	 * function to return unique values for all objects
-	 * return objectValues: list of list of values for each object
+	/**
+	 * Returns set of unique values for all objects
+	 * @param dataTuples	dataset of votes of objects by sources
+	 * @return				list of list of unique values of objects
 	 */
 	public List<List<String>> getObjectUniqueValues(List<List<String>> dataTuples) {
 		List<List<String>> objectValues = new ArrayList<List<String>>();
@@ -108,27 +80,34 @@ public class accuPR {
 		return objectValues;
 	}
 	
+	/**
+	 * Implements truth finder
+	 * @param dataTuples	dataset of votes of objects by sources
+	 * @param indices		list of validated objects alongwith their true values
+	 */
 	public accuPR(List<List<String>> dataTuples, List<List<String>> indices) {
-		int 				numObjects   = dataTuples.size();
-		int 				numSources   = returnNumberOfSources(dataTuples);
-		List<List<String>>  objectValues = getObjectUniqueValues(dataTuples);
-
+		int	numObjects = dataTuples.size();
+		int numSources = this.numberOfSources(dataTuples);
+		
+		List<List<String>> objectValues = this.getObjectUniqueValues(dataTuples);
 		List<Integer> numUniqueValuesArray = new ArrayList<Integer>();
         for (int i = 0; i < numObjects; i++)
 			numUniqueValuesArray.add(objectValues.get(i).size());
-		int 		 numFalseValues		 = Collections.max(numUniqueValuesArray) - 1; // excluding the true value
+		int numFalseValues = Collections.max(numUniqueValuesArray) - 1;
         
-		double[] 	 sourceAccuracyPrev	 = new double[numSources];
+		double[] sourceAccuracyPrev	= new double[numSources];
 		List<String> currentObjectValues = new ArrayList<String>();
-		double[]   	 valueConfidence  	 = new double[numFalseValues + 1];
-		double 	   	 sumValueProbability = 0;
-		int 	   	 countObjects		 = 0;
+		double[] valueConfidence = new double[numFalseValues + 1];
+		double sumValueProbability = 0;
+		int countObjects = 0;
 		List<Integer> truthIndices = new ArrayList<Integer>();
 		
-		this.valueProbability 	 = new double[numObjects][numFalseValues + 1];
-		this.sourceAccuracy		 = new double[numSources];
+		this.valueProbability = new double[numObjects][numFalseValues + 1];
+		this.sourceAccuracy = new double[numSources];
+		for (int i = 0; i < this.valueProbability.length; i++)
+			Arrays.fill(this.valueProbability[i], 1);
 		
-		Arrays.fill(this.sourceAccuracy, initialAccuracy);
+		Arrays.fill(this.sourceAccuracy, this.initialAccuracy);
 		Arrays.fill(sourceAccuracyPrev, -0.1);
 			
 		if (indices != null) { // some objects have been validated - feed this knowledge into the system
@@ -157,8 +136,8 @@ public class accuPR {
 					currentObjectValues = objectValues.get(i);
 					Arrays.fill(valueConfidence, 0);
 					for (int j = 0; j < numSources; j++) 
-						if (dataTuples.get(i).size() > j) 
-							if (dataTuples.get(i).get(j) != null 
+						if (dataTuples.get(i).size() > j 
+								    && dataTuples.get(i).get(j) != null 
 									&& this.sourceAccuracy[j] != 1 
 									&& this.sourceAccuracy[j] != 0
 									&& numFalseValues > 0) 
@@ -172,9 +151,9 @@ public class accuPR {
 					}
 					
 					for (int j = 0; j < numFalseValues + 1; j++)
-						this.valueProbability[i][j] =  roundToN(this.valueProbability[i][j]/sumValueProbability, 3);
+						this.valueProbability[i][j] =  this.valueProbability[i][j]/sumValueProbability;
 				}
-			}				
+			}
 			
 			// update source accuracies
 			Arrays.fill(this.sourceAccuracy, 0);
@@ -182,12 +161,10 @@ public class accuPR {
 				countObjects = 0;
 				for (int j = 0; j < numObjects; j++) {
 					currentObjectValues = objectValues.get(j);
-					if (dataTuples.get(j).size() > i) {
-						if (dataTuples.get(j).get(i) != null) {
-							countObjects++;
-							this.sourceAccuracy[i] += 
-									this.valueProbability[j][currentObjectValues.indexOf(dataTuples.get(j).get(i))];
-						}
+					if (dataTuples.get(j).size() > i && dataTuples.get(j).get(i) != null) {
+						countObjects++;
+						this.sourceAccuracy[i] += 
+								this.valueProbability[j][currentObjectValues.indexOf(dataTuples.get(j).get(i))];
 					}
 				}
 				this.sourceAccuracy[i] /= (double) countObjects; 

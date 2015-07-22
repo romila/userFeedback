@@ -33,158 +33,6 @@ public class syntheticData {
 		
 		return (new ArrayList<String>(new HashSet<String>(uniqueValues)));
 	}
-		
-	/*
-	 * function to generate synthetic networked data 
-	 * basic grid + hubs + random upto density d
-	 */
-	public void gridHubsDensity(int p, int q, double x, double d, double max, double min, double a) throws IOException {
-		Random r = new Random(System.currentTimeMillis());
-		String[][] grid = new String[2*p + 1][2*q + 1];
-		int n = 0, m = 0;
-		for (int i = 0; i < grid.length; i++) {
-			for (int j = 0; j < grid[i].length; j++) {
-				if ((i + j) % 2 != 0)
-					grid[i][j] = Integer.toString(m++);
-				else {
-					if (i % 2 == 0)
-						grid[i][j] = Integer.toString(n++);
-				}
-			}
-		}
-		
-		System.out.println(n + "\t" + m);
-		
-		// record if object i and source j are connected
-		boolean[][] isConnected = new boolean[n][m];
-		for (int i = 0; i < grid.length; i++) {
-			for (int j = 0; j < grid[i].length; j++) {
-				if ((i % 2 == 0) && (j % 2 == 0)) {
-					if (i - 1 >= 0)
-						isConnected[Integer.parseInt(grid[i][j])][Integer.parseInt(grid[i-1][j])] = true;
-					if (i + 1 < 2*p + 1)
-						isConnected[Integer.parseInt(grid[i][j])][Integer.parseInt(grid[i+1][j])] = true;
-					if (j - 1 >= 0)
-						isConnected[Integer.parseInt(grid[i][j])][Integer.parseInt(grid[i][j-1])] = true;
-					if (j + 1 < 2*q + 1)
-						isConnected[Integer.parseInt(grid[i][j])][Integer.parseInt(grid[i][j+1])] = true;
-				}
-			}
-		}
-		System.out.println(n + "objects and " + m + "sources");
-		
-		double[] accuracies = new double[m];
-//		Arrays.fill(accuracies, a);
-		for (int i = 0; i < m; i++) 
-			accuracies[i] = r.nextDouble() * (max - min) + min;
-			
-		String[][] data = new String[n][m];
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < m; j++) {
-				if (isConnected[i][j] && data[i][j] == null) {
-					if (r.nextDouble() <= accuracies[j])
-						data[i][j] = Integer.toString(0);
-					else
-						data[i][j] = Integer.toString(1);
-				}	
-			}
-			
-			List<String> data_row = new ArrayList<String>(Arrays.asList(data[i]));
-			data_row.removeAll(Collections.singleton(null));
-			List<String> objectValues = new ArrayList<String>(new HashSet<String>(data_row));
-			if (objectValues.size() < 2) {
-				String hasValue = objectValues.get(0); String putValue = null;
-				if (hasValue.equals("1")) // all values are 1
-					putValue = Integer.toString(0);
-				else
-					putValue = Integer.toString(1);
-				int location = r.nextInt(m); 
-				boolean placed = false;
-				while (!placed) {
-					if (data[i][location] == null) {
-						data[i][location] = putValue;
-						placed = !placed;
-					}
-					else
-						location = r.nextInt(m);
-				}
-			}
-		}
-	
-		String[][] truth = new String[n][2];
-		for (int i = 0; i < n; i++) {
-			truth[i][0] = Integer.toString(i);
-			truth[i][1] = Integer.toString(0);
-		}
-		
-		int countTotal = 0;
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < m; j++) {
-				if (data[i][j] != null) {
-					countTotal++;
-				}
-			}
-		}
-		System.out.println("Basic grid density = " + (double)countTotal/(m*n));
-		
-		// add 2 identical hub objects
-//		List<Integer> hubObjects = new ArrayList<Integer>();
-//		for (int i = 0; i < 5; i++) {
-//			int object = r.nextInt(n);
-//			hubObjects.add(object);
-//			for (int source = 0; source < m; source++)
-//				data[object][source] = (r.nextDouble() > accuracies[source] ? Integer.toString(0) : Integer.toString(1));
-//		}
-		
-		// add x% random hub objects
-		int hubs = (int) (x * n); 
-		int hubDegree = m/4;
-		List<Integer> hubObjects = new ArrayList<Integer>();
-		for (int i = 0; i < hubs; i++) {
-			int object = r.nextInt(n);
-			hubObjects.add(object);
-			int addedDegree = 0;
-			while (addedDegree < hubDegree) {
-				int source = r.nextInt(m);
-				if (data[object][source] == null) { 
-					data[object][source] = (r.nextDouble() > accuracies[source] ? Integer.toString(0) : Integer.toString(1));
-					addedDegree++;
-				}
-			}
-		}
-		
-		// add i votes to hub surroundings
-		for (int i = 0; i < hubObjects.size(); i++) {
-			int object = hubObjects.get(i);
-			for (int j = 0; j < m; j++) {
-				if (data[object][j] != null) {
-					int added = 0;
-					while (added < i) {
-						int voteObject = r.nextInt(n);
-						if (!hubObjects.contains(voteObject) && data[voteObject][j] == null) {
-							data[voteObject][j] = (r.nextDouble() > accuracies[j] ? Integer.toString(0) : Integer.toString(1));
-							countTotal++;
-							added++;
-						}
-					}
-				}
-			}
-		}
-		System.out.println("Density after adding " + hubObjects.size() + " hubs = " + (double)countTotal/(m*n));
-		
-		while (countTotal < d * m * n) {
-			int object = r.nextInt(n);
-			int source = r.nextInt(m);
-			if (!hubObjects.contains(object) && data[object][source] == null) {
-				data[object][source] = r.nextDouble() < accuracies[source] ? Integer.toString(0) : Integer.toString(1);
-				countTotal++;
-			}
-		}
-		System.out.println("Density after adding all edges = " + (double)countTotal/(m*n));
-		
-		writeToFile(data, "synthetic_data.txt");
-		writeToFile(truth, "synthetic_truth.txt");
-	}
 	
 	/*
 	 * function to generate synthetic random data
@@ -293,7 +141,7 @@ public class syntheticData {
 	/*
 	 * function to generate network data with hubs for centrality experiments
 	 */
-	public void centralityGrid(int p, int q, double x) throws IOException {
+	public void centralityGrid(int p, int q, double x, double density) throws IOException {
 		// PrintStream out = new PrintStream(new FileOutputStream("output.txt"));
 		// System.setOut(out);
 		
@@ -342,7 +190,7 @@ public class syntheticData {
 			hubObjects.add(object);
 			System.out.println("hub " + object);
 			int addedDegree = 0;
-			while (addedDegree < hubDegree) {
+			while (addedDegree < hubDegree + 10 * i) {
 				int source = r.nextInt(m);
 				if (!isConnected[object][source]) { 
 					isConnected[object][source] = true;
@@ -355,7 +203,7 @@ public class syntheticData {
 		double d = countTotal/(double) (m * n);
 		System.out.println("Density after adding " + hubs + " hubs = " + d);
 		
-		while (countTotal/(double)(m*n) < 1.5 * d) {
+		while (countTotal/(double)(m*n) < density) {
 			int object = r.nextInt(n);
 			int source = r.nextInt(m);
 			if (!isConnected[object][source] && !hubObjects.contains(object)) {
@@ -392,12 +240,12 @@ public class syntheticData {
 		String[][] data = new String[n][m];
 		String one = String.valueOf(1);
 		String zero = String.valueOf(0);
-		double hubFraction = 0.7; // can tune: probability of having zeroes
-		double nonHubFraction = 0.5;
+		double hubFraction = r.nextDouble(); // can tune: probability of having zeroes
+		double nonHubFraction = 0.6;
 		for (int i = 0; i < n; i++) {
 			int countZeroes = 0;
 			int zeroes;
-			
+//			double hubFraction = 0.1 + 0.9 * r.nextDouble(); // can tune: probability of having zeroes
 			if (hubObjects.contains(i))  // assign same entropy to hubs
 				zeroes = (int) (hubFraction * numObjectVotes[i]);// can tune;
 			else
@@ -453,11 +301,11 @@ public class syntheticData {
 	public static void main(String[] args) throws IOException {
 		syntheticData g = new syntheticData();
 //		g.gridHubsDensity(p, q, x, d, max, min, a);
-		int p, q; p = q = 9;
-//		g.gridHubsDensity(p, q, 0.02, 0.2, 1, 0.6, 1); // (p x q) grid, x% hubs, d density
-		g.randomDensity(300, 10, 0.5, 0.6, 1);
+		int p, q; p = q = 6;
+//		g.gridHubsDensity(p, q, 0.05, 0.1, 1, 0.6, 1); // (p x q) grid, x% hubs, d density
+		g.randomDensity(4000, 10, 0.34, 0.8, 0.8);
 //		g.chain(10, 0.01, 0.6, 1);
-//		g.centralityGrid(6, 6, 0.03);
+//		g.centralityGrid(9, 9, 0.02, 0.05);
 		
 		System.out.println("End");
 	}
